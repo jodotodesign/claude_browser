@@ -55,6 +55,12 @@ Ein Symbol, das im Startabruf nicht dabei war (frisch gesucht), wird beim ersten
 geholt und dann ebenfalls festgehalten. Neue Kurse gibt es nur über `POST /api/refresh` oder einen
 Neustart; nur dabei wird mit `refresh=True` auch der Plattencache übergangen.
 
+**Nachversuche**: Steht Yahoo beim Start gerade auf Sperre, fällt der ganze Abruf aus — ohne
+Gegenmaßnahme hätte das Dashboard die Sitzung über keine Kurse. `warmup()` legt darum die
+ausgefallenen Symbole auf einen Timer (`WARMUP_RETRIES`, `RETRY_WAIT`, frühestens nach Ablauf von
+`_yahoo_blocked_until`) und versucht sie von selbst erneut; `retryAt`/`attempt` in `/api/snapshot`
+melden das nach außen. Ein Nachversuch setzt nur die Fehler **seiner eigenen** Symbole zurück.
+
 **Quellenkette** (`PROVIDERS`): `_yahoo_history` → `_twelvedata_history` → `_coingecko_history`.
 `yahoo_history()` (Name historisch) probiert sie der Reihe nach durch und liefert notfalls
 veraltete Cache-Daten. Schlüssel kommen aus `config.json` oder `FD_TWELVEDATA_KEY` (siehe
@@ -125,8 +131,14 @@ Weitere nicht offensichtliche Punkte:
   gesuchtes Symbol löst noch `Prices.history()` mit Netzabruf aus (einmalig, danach hält es der
   Server fest). Die Statusanzeige nennt darum den Zeitpunkt des Abrufs (`statusText()`) statt
   „live“, und der Knopf **Kurse aktualisieren** im Depot ruft `Prices.reload()` + `boot(true)` auf.
-  Antwortet der Server nicht auf `/api/snapshot` (alte Version), gibt `preload()` `false` zurück und
-  alles läuft wie zuvor über Einzelabrufe.
+  Antwortet der Server nicht auf `/api/snapshot` (alte Version), gibt `preload()` `false` zurück,
+  `Prices.outdated` wird gesetzt und alles läuft wie zuvor über Einzelabrufe — dann steht das aber
+  auch oben im Banner und in der Statusanzeige. Der Fall ist häufiger, als er klingt: der Server
+  liefert `web_app.html` bei jedem Aufruf frisch von der Platte, **seinen eigenen Code aber nur beim
+  Start** — wer nur die Dateien austauscht, hat die neue Oberfläche vor dem alten Server.
+- **Nachgeholte Kurse**: `scheduleRecheck()` holt den Abzug später noch einmal (`Prices.take()`),
+  solange `snapshotErrors` gefüllt ist und der Server einen `retryAt` meldet. Neu angekommene
+  Symbole werden übernommen und die Ansicht neu gezeichnet, ohne dass jemand etwas drücken muss.
 - **Speicher, zwei Orte**: `localStorage` (`fd_state_v1` Journal, `fd_prices_v1` Kurscache mit max.
   24 Symbolen und 1 Stunde) **und** `depot.json` über `FileStore`. `saveState()` setzt
   `state.updatedAt` und stößt einen Sammel-Timer (600 ms) an, damit mehrere Buchungen kurz
@@ -162,6 +174,9 @@ gekauft werden kann jedes Symbol, das Yahoo kennt.
 9c. Sitzungsspeicher: in der Ordermaske nacheinander mehrere Symbole auswählen und die Ansicht
    „Märkte“ öffnen → im Serverprotokoll erscheint **kein** neuer Abruf, nur `/api/…`-Zeilen des
    Browsers; „Kurse aktualisieren“ im Depot lädt sichtbar neu und setzt den Zeitstempel oben hoch
+9d. Alter Server: `web_app.html` austauschen, aber den vorher gestarteten Server weiterlaufen lassen
+   → Banner „Der laufende Server kennt den Sitzungsspeicher noch nicht“, Statusanzeige „Server
+   veraltet“ (nicht still auf Einzelabrufe zurückfallen)
 10. Hell/Dunkel umschalten → Diagrammfarben wechseln mit
 11. `web_app.html` per `file://` öffnen → Demo-Modus, alles bedienbar
 

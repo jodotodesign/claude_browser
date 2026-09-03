@@ -602,6 +602,8 @@ _session = {
     "done": 0,
     "total": 0,
     "loadedAt": 0.0,
+    "retryAt": 0.0,            # Zeitpunkt des naechsten Nachversuchs, 0 = keiner
+    "attempt": 0,
 }
 _session_lock = threading.Lock()
 _entry_locks = {}
@@ -715,16 +717,27 @@ def warmup_symbols():
     return syms
 
 
-def warmup(force=False):
+# Steht Yahoo beim Start gerade auf Sperre, faellt der ganze Abruf aus und
+# das Dashboard haette die Sitzung ueber keine Kurse. Deshalb werden die
+# ausgefallenen Symbole spaeter von selbst noch einmal versucht – die Sperre
+# loest sich nach Minuten, ohne dass jemand etwas druecken muss.
+WARMUP_RETRIES = 5
+RETRY_WAIT = 90
+
+
+def warmup(symbols=None, force=False, attempt=1):
     """Startabruf: alle Symbole der Reihe nach in den Sitzungsspeicher."""
-    syms = warmup_symbols()
+    syms = warmup_symbols() if symbols is None else list(symbols)
     with _session_lock:
         if _session["loading"]:
             return False
         _session["loading"] = True
         _session["done"] = 0
         _session["total"] = len(syms)
-        _session["errors"] = {}
+        _session["retryAt"] = 0.0
+        _session["attempt"] = attempt
+        for sym in syms:                     # nur die eigenen Fehler zuruecksetzen
+            _session["errors"].pop(sym, None)
         if force:
             _session["hist"].clear()
             _session["fx"].clear()
@@ -752,12 +765,24 @@ def warmup(force=False):
         with _session_lock:
             _session["loading"] = False
             _session["loadedAt"] = time.time()
+            failed = [s for s in syms if s in _session["errors"]]
     print("  Kurse der Sitzung geladen: %d von %d Symbolen" % (ok, len(syms)))
+
+    if failed and attempt <= WARMUP_RETRIES:
+        # Nach einer Yahoo-Sperre erst wieder anklopfen, wenn sie abgelaufen ist
+        wait = max(RETRY_WAIT, _yahoo_blocked_until[0] - time.time() + 5)
+        with _session_lock:
+            _session["retryAt"] = time.time() + wait
+        print("  %d Symbol(e) ohne Kurs – neuer Versuch in %d s (%d/%d)"
+              % (len(failed), wait, attempt, WARMUP_RETRIES))
+        timer = threading.Timer(wait, warmup, kwargs={"symbols": failed, "attempt": attempt + 1})
+        timer.daemon = True
+        timer.start()
     return True
 
 
 def start_warmup(force=False):
-    threading.Thread(target=warmup, args=(force,), daemon=True).start()
+    threading.Thread(target=warmup, kwargs={"force": force}, daemon=True).start()
 
 
 def snapshot_meta(with_lists=True):
@@ -769,6 +794,8 @@ def snapshot_meta(with_lists=True):
             "loadedAt": _session["loadedAt"],
             "range": SESSION_RANGE,
             "count": len(_session["hist"]),
+            "retryAt": _session["retryAt"],
+            "attempt": _session["attempt"],
         }
         if with_lists:
             out["symbols"] = sorted(_session["hist"])

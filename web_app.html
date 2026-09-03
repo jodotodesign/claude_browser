@@ -801,6 +801,8 @@ const Prices = (() => {
   let hasTwelveData = false;
   let snapshotAt = 0;        // Zeitpunkt des Startabrufs (ms), 0 = keiner
   let snapshotErrors = {};   // Symbol -> Fehler beim Startabruf
+  let snapshotRetryAt = 0;   // naechster Nachversuch des Servers (ms), 0 = keiner
+  let outdated = false;      // Server laeuft noch ohne Sitzungsspeicher
   const hist = {};       // symbol -> {name,currency,cls,dates:[],map:{},price,prev}
   const fx = {};         // waehrung -> {rates:{}, latest, dates:[]}
   const pending = {};
@@ -920,16 +922,27 @@ const Prices = (() => {
       let r;
       try { r = await fetch("/api/snapshot", {cache:"no-store"}); }
       catch (e) { return false; }
-      if (!r.ok) return false;               // Server ohne Sitzungsspeicher
+      if (!r.ok) {                           // Server laeuft noch ohne Sitzungsspeicher
+        outdated = true;
+        return false;
+      }
+      outdated = false;
       meta = await r.json();
       if (!meta.loading) break;
       if (onProgress) onProgress(meta.done, meta.total);
       await new Promise(res => setTimeout(res, 500));
     }
     if (!meta || meta.loading) return false;
+    return await take();
+  }
 
-    const r = await fetch("/api/snapshot?full=1", {cache:"no-store"});
-    if (!r.ok) return false;
+  /* Den Abzug holen und uebernehmen – auch spaeter, wenn der Server
+     ausgefallene Symbole nachgeholt hat. */
+  async function take() {
+    let r;
+    try { r = await fetch("/api/snapshot?full=1", {cache:"no-store"}); }
+    catch (e) { return false; }
+    if (!r.ok) { outdated = true; return false; }
     const j = await r.json();
     Object.keys(j.history || {}).forEach(sym => adopt(sym, j.history[sym]));
     Object.keys(j.fx || {}).forEach(cur => {
@@ -938,6 +951,7 @@ const Prices = (() => {
                                dates: Object.keys(f.rates || {}).sort()};
     });
     snapshotErrors = j.errors || {};
+    snapshotRetryAt = j.retryAt ? j.retryAt * 1000 : 0;
     snapshotAt = j.loadedAt ? j.loadedAt * 1000 : Date.now();
     return true;
   }
@@ -1067,12 +1081,14 @@ const Prices = (() => {
   }
 
   return {
-    detect, preload, reload, history, fxSeries, priceAt, fxAt, fxNow, search,
+    detect, preload, take, reload, history, fxSeries, priceAt, fxAt, fxNow, search,
     get live() { return live; },
     get sourceInfo() { return sourceInfo; },
     get hasTwelveData() { return hasTwelveData; },
     get snapshotAt() { return snapshotAt; },
     get snapshotErrors() { return snapshotErrors; },
+    get snapshotRetryAt() { return snapshotRetryAt; },
+    get outdated() { return outdated; },
     get loaded() { return hist; },
     meta: sym => hist[sym] || null,
     clearCache
@@ -2147,10 +2163,34 @@ function setStatus(kind, text) {
   $("#statusPill").innerHTML = '<span class="dot ' + kind + '"></span><span>' + esc(text) + "</span>";
 }
 
+/* Was beim Startabruf ausgefallen ist (meist eine Yahoo-Sperre), versucht der
+   Server von selbst noch einmal. Hier wird das Ergebnis eingesammelt, damit
+   niemand die Seite neu laden oder einen Knopf suchen muss. */
+let recheckTimer = null;
+function scheduleRecheck() {
+  clearTimeout(recheckTimer);
+  if (!Prices.live) return;
+  const fehlt = Object.keys(Prices.snapshotErrors || {}).length;
+  if (!fehlt || !Prices.snapshotRetryAt) return;
+  const wait = Math.min(Math.max(Prices.snapshotRetryAt - Date.now() + 8000, 15000), 900000);
+  recheckTimer = setTimeout(async () => {
+    const vorher = Object.keys(Prices.loaded).length;
+    await Prices.take();
+    const dazu = Object.keys(Prices.loaded).length - vorher;
+    if (dazu > 0) {
+      setStatus("live", statusText());
+      toast(dazu + " nachgeholte Kurs(e) übernommen", "ok");
+      refreshAll();
+    }
+    scheduleRecheck();
+  }, wait);
+}
+
 /* Die Kurse stehen fuer die ganze Sitzung fest – dann soll oben auch stehen,
    von wann sie sind, und nicht "live". */
 function statusText() {
   if (!Prices.live) return "Demo-Modus – simulierte Kurse";
+  if (Prices.outdated) return "Server veraltet – bitte neu starten";
   if (!Prices.snapshotAt) return "Live-Kurse (Yahoo Finance)";
   return "Kurse vom " + new Date(Prices.snapshotAt).toLocaleString("de-DE",
     {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"}) + " · Sitzung";
@@ -2162,6 +2202,22 @@ function statusText() {
 function updateBanner() {
   const el = $("#banner");
   if (!el) return;
+
+  /* Der Server liest web_app.html bei jedem Aufruf neu von der Platte, seinen
+     eigenen Code aber nur beim Start. Wer nur die Dateien austauscht, hat
+     darum die neue Oberflaeche vor dem alten Server – und wieder Kursabrufe
+     mitten im Handeln. Das muss oben stehen, nicht in den Einstellungen. */
+  if (Prices.outdated) {
+    el.innerHTML = '<div class="warnbar"><span class="ic">⚠️</span><div class="tx">' +
+      "<b>Der laufende Server kennt den Sitzungsspeicher noch nicht.</b> Er wurde vor der " +
+      "Aktualisierung gestartet, deshalb wird jeder Kurs weiterhin einzeln bei Yahoo geholt — " +
+      "und genau das schlägt beim Handeln fehl. Im Terminal mit <code>Strg+C</code> beenden und " +
+      "<code>python3 server.py</code> neu starten." +
+      "</div></div>";
+    el.className = "show";
+    return;
+  }
+
   if (FileStore.available) { el.className = ""; el.innerHTML = ""; return; }
 
   // Nur wenn /api/status antwortet, laeuft unser Server ueberhaupt
@@ -2266,7 +2322,11 @@ async function boot(skipDetect) {
       "den Server neu startest. Damit läuft während des Handelns keine Abfrage mehr ins Leere: " +
       "Yahoo drosselt sonst mitten in der Ordermaske." +
       (fehlt.length ? "<br><br><b>Beim Startabruf ohne Kurs geblieben:</b> " + esc(fehlt.join(", ")) +
-        " – „Kurse aktualisieren“ holt sie später nach." : "") +
+        " – der Server versucht es von selbst noch einmal" +
+        (Prices.snapshotRetryAt ? " (nächster Versuch gegen " +
+          new Date(Prices.snapshotRetryAt).toLocaleTimeString("de-DE",
+            {hour:"2-digit", minute:"2-digit"}) + " Uhr)" : "") +
+        "; „Kurse aktualisieren“ geht auch sofort." : "") +
       "<br><br>Aktive Quellen: " + esc(Prices.sourceInfo) + ".<br><br>" +
       "Abgefragt wird der Reihe nach: <b>Yahoo Finance</b> (ohne Schlüssel, breiteste Abdeckung — " +
       "Tagesschlusskurse, um Ausschüttungen bereinigt), dann <b>Twelve Data</b>" +
@@ -2321,6 +2381,7 @@ async function boot(skipDetect) {
   }
 
   refreshAll();
+  scheduleRecheck();
 }
 
 loadState();
