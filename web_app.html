@@ -318,6 +318,7 @@ footer.disc{margin-top:26px;font-size:11.5px;color:var(--fg-3);line-height:1.6;t
       <button class="btn sm" id="refreshBtn">Kurse aktualisieren</button>
     </div>
     <div class="tbl-wrap"><table id="posTable"></table></div>
+    <div class="hint" style="margin-top:12px" id="priceAgeHint"></div>
   </div>
 </section>
 
@@ -798,6 +799,8 @@ const Prices = (() => {
   let live = false;
   let sourceInfo = "";
   let hasTwelveData = false;
+  let snapshotAt = 0;        // Zeitpunkt des Startabrufs (ms), 0 = keiner
+  let snapshotErrors = {};   // Symbol -> Fehler beim Startabruf
   const hist = {};       // symbol -> {name,currency,cls,dates:[],map:{},price,prev}
   const fx = {};         // waehrung -> {rates:{}, latest, dates:[]}
   const pending = {};
@@ -855,6 +858,9 @@ const Prices = (() => {
     } catch (e) {}
     return null;
   }
+  function clearCache() {
+    try { localStorage.removeItem(PX_KEY); } catch (e) {}
+  }
   function cacheWrite(sym, data) {
     try {
       const all = JSON.parse(localStorage.getItem(PX_KEY) || "{}");
@@ -876,6 +882,8 @@ const Prices = (() => {
         live = !!j.live;
         sourceInfo = j.source || "";
         hasTwelveData = !!j.twelvedata;
+        const snap = j.snapshot || null;
+        if (snap && snap.loadedAt) snapshotAt = snap.loadedAt * 1000;
         return live;
       }
     } catch (e) {}
@@ -883,11 +891,80 @@ const Prices = (() => {
     return false;
   }
 
+  /* Serverantwort -> interne Kursreihe (auch fuer den Startabruf) */
+  function adopt(sym, raw) {
+    const dates = [], map = {};
+    (raw.points || []).forEach(p => { dates.push(p[0]); map[p[0]] = p[1]; });
+    const out = {
+      symbol: sym, name: raw.name || sym,
+      currency: (raw.currency || "EUR").toUpperCase(),
+      cls: (catalogBySymbol[sym] || {}).c || mapType(raw.type),
+      dates, map,
+      price: raw.price != null ? raw.price : (dates.length ? map[dates[dates.length - 1]] : 0),
+      prev: raw.previousClose != null ? raw.previousClose
+            : (dates.length > 1 ? map[dates[dates.length - 2]] : null)
+    };
+    rememberMeta(sym, out);
+    hist[sym] = out;
+    return out;
+  }
+
+  /* Einmal je Sitzung: der Server holt beim Start alle Kurse des Katalogs und
+     des Depots, hier werden sie in einem Zug uebernommen. Danach laeuft kein
+     Kursabruf mehr nebenher — sonst scheitert ausgerechnet die Abfrage, die
+     man beim Handeln gerade braucht, an Yahoos Drosselung. */
+  async function preload(onProgress) {
+    if (!live) return false;
+    let meta = null;
+    for (let i = 0; i < 600; i++) {          // hoechstens ~5 Minuten begleiten
+      let r;
+      try { r = await fetch("/api/snapshot", {cache:"no-store"}); }
+      catch (e) { return false; }
+      if (!r.ok) return false;               // Server ohne Sitzungsspeicher
+      meta = await r.json();
+      if (!meta.loading) break;
+      if (onProgress) onProgress(meta.done, meta.total);
+      await new Promise(res => setTimeout(res, 500));
+    }
+    if (!meta || meta.loading) return false;
+
+    const r = await fetch("/api/snapshot?full=1", {cache:"no-store"});
+    if (!r.ok) return false;
+    const j = await r.json();
+    Object.keys(j.history || {}).forEach(sym => adopt(sym, j.history[sym]));
+    Object.keys(j.fx || {}).forEach(cur => {
+      const f = j.fx[cur] || {};
+      fx[cur.toUpperCase()] = {rates: f.rates || {}, latest: f.latest || 1,
+                               dates: Object.keys(f.rates || {}).sort()};
+    });
+    snapshotErrors = j.errors || {};
+    snapshotAt = j.loadedAt ? j.loadedAt * 1000 : Date.now();
+    return true;
+  }
+
+  /* Ausdrueckliches Neuladen: der Server holt die Kurse noch einmal frisch. */
+  async function reload() {
+    if (!live) return false;
+    let r;
+    try { r = await fetch("/api/refresh", {method:"POST"}); }
+    catch (e) { throw new Error("Der Server antwortet nicht: " + e.message); }
+    if (!r.ok) throw new Error("Der laufende Server kennt das Neuladen noch nicht – " +
+                               "beende ihn mit Strg+C und starte ihn neu.");
+    clearCache();
+    Object.keys(hist).forEach(k => delete hist[k]);
+    Object.keys(fx).forEach(k => delete fx[k]);
+    snapshotAt = 0;
+    return true;
+  }
+
   async function history(sym) {
     if (hist[sym]) return hist[sym];
     if (pending[sym]) return pending[sym];
 
     pending[sym] = (async () => {
+      // Nach dem Startabruf steht alles Gewohnte schon bereit; hierher kommt
+      // nur, was neu gesucht wurde. Der Server holt so ein Symbol einmal und
+      // haelt es dann ebenfalls fuer die Sitzung fest.
       const cached = live ? cacheRead(sym) : null;
       let raw = cached;
       if (!raw && live) {
@@ -900,17 +977,7 @@ const Prices = (() => {
 
       let out;
       if (raw) {
-        const dates = [], map = {};
-        raw.points.forEach(p => { dates.push(p[0]); map[p[0]] = p[1]; });
-        out = {
-          symbol: sym, name: raw.name || sym,
-          currency: (raw.currency || "EUR").toUpperCase(),
-          cls: (catalogBySymbol[sym] || {}).c || mapType(raw.type),
-          dates, map,
-          price: raw.price != null ? raw.price : (dates.length ? map[dates[dates.length - 1]] : 0),
-          prev: raw.previousClose != null ? raw.previousClose
-                : (dates.length > 1 ? map[dates[dates.length - 2]] : null)
-        };
+        out = adopt(sym, raw);
       } else {
         const cat = catalogBySymbol[sym] || {n: sym, c: "sonstige"};
         const gen = demoSeries(sym, cat.c);
@@ -921,9 +988,9 @@ const Prices = (() => {
           price: gen.map[last],
           prev: gen.map[gen.dates[gen.dates.length - 2]]
         };
+        rememberMeta(sym, out);
+        hist[sym] = out;
       }
-      rememberMeta(sym, out);
-      hist[sym] = out;
       delete pending[sym];
       return out;
     })();
@@ -1000,13 +1067,15 @@ const Prices = (() => {
   }
 
   return {
-    detect, history, fxSeries, priceAt, fxAt, fxNow, search,
+    detect, preload, reload, history, fxSeries, priceAt, fxAt, fxNow, search,
     get live() { return live; },
     get sourceInfo() { return sourceInfo; },
     get hasTwelveData() { return hasTwelveData; },
+    get snapshotAt() { return snapshotAt; },
+    get snapshotErrors() { return snapshotErrors; },
     get loaded() { return hist; },
     meta: sym => hist[sym] || null,
-    clearCache: () => { try { localStorage.removeItem(PX_KEY); } catch (e) {} }
+    clearCache
   };
 })();
 
@@ -1403,6 +1472,17 @@ function allocRow(sl, total) {
 }
 
 function renderDepot() {
+  const hint = $("#priceAgeHint");
+  if (hint) {
+    hint.innerHTML = !Prices.live
+      ? "Simulierte Kurse – die Seite läuft ohne den lokalen Server."
+      : Prices.snapshotAt
+      ? "Die Kurse wurden am <b>" + esc(new Date(Prices.snapshotAt).toLocaleString("de-DE")) +
+        "</b> geholt und bleiben für diese Sitzung unverändert – so scheitert beim Handeln " +
+        "keine Abfrage an der Drosselung. <b>„Kurse aktualisieren“</b> holt sie einmalig neu."
+      : "Die Kurse werden beim Start einmal geholt und gelten dann für die ganze Sitzung.";
+  }
+
   const s = snapshot();
   $("#depotKpis").innerHTML =
     kpiCard("Depotwert", eur(s.market), (s.dayAbs >= 0 ? "▲ " : "▼ ") + signed(s.dayAbs) + " heute", cls(s.dayAbs), true) +
@@ -1561,7 +1641,8 @@ async function selectAsset(symbol) {
   let h;
   try { h = await Prices.history(symbol); }
   catch (e) {
-    toast("Keine Kursdaten für " + symbol + ": " + e.message, "err");
+    toast("Keine Kursdaten für " + symbol + ": " + e.message +
+          " – im Depot „Kurse aktualisieren“ holt den Startabruf nach.", "err");
     $("#selBox").style.display = "none";
     $("#tEmptyHint").style.display = "";
     return;
@@ -1890,10 +1971,21 @@ document.addEventListener("click", e => {
   if (grp) { marketGroup = grp.dataset.group; renderMarkets(); }
 });
 $("#ledgerFilter").addEventListener("change", renderLedger);
+/* Der einzige Weg zu neuen Kursen innerhalb einer Sitzung: der Server holt
+   sie auf Zuruf noch einmal, danach steht wieder alles fest. */
 $("#refreshBtn").addEventListener("click", async () => {
-  Prices.clearCache();
-  toast("Lade aktuelle Kurse …");
-  location.reload();
+  const btn = $("#refreshBtn");
+  if (!Prices.live) { toast("Ohne den lokalen Server gibt es nur simulierte Kurse.", "err"); return; }
+  btn.disabled = true;
+  const zurueck = btn.textContent;
+  btn.textContent = "lädt …";
+  setStatus("busy", "hole neue Kurse …");
+  let fehler = null;
+  try { await Prices.reload(); } catch (e) { fehler = e.message; }
+  try { await boot(true); } catch (e) { fehler = fehler || e.message; }
+  btn.disabled = false;
+  btn.textContent = zurueck;
+  toast(fehler || "Kurse neu geladen", fehler ? "err" : "ok");
 });
 
 /* ------------------------------------------------------ Einstellungen */
@@ -2055,6 +2147,15 @@ function setStatus(kind, text) {
   $("#statusPill").innerHTML = '<span class="dot ' + kind + '"></span><span>' + esc(text) + "</span>";
 }
 
+/* Die Kurse stehen fuer die ganze Sitzung fest – dann soll oben auch stehen,
+   von wann sie sind, und nicht "live". */
+function statusText() {
+  if (!Prices.live) return "Demo-Modus – simulierte Kurse";
+  if (!Prices.snapshotAt) return "Live-Kurse (Yahoo Finance)";
+  return "Kurse vom " + new Date(Prices.snapshotAt).toLocaleString("de-DE",
+    {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"}) + " · Sitzung";
+}
+
 /* Wenn das Depot nur im Browser liegt, muss das oben stehen und nicht in
    den Einstellungen versteckt sein – sonst geht es beim Leeren des
    Browser-Speichers verloren, ohne dass jemand gewarnt war. */
@@ -2142,17 +2243,31 @@ async function boot(skipDetect) {
     await Prices.detect();
     await syncStores();
   }
+  // Alle Kurse dieser Sitzung in einem Zug uebernehmen – danach braucht weder
+  // die Ordermaske noch die Marktansicht noch einen Netzabruf.
+  if (Prices.live) {
+    setStatus("busy", "lade Kurse der Sitzung …");
+    await Prices.preload((done, total) =>
+      setStatus("busy", "lade Kurse (" + done + "/" + (total || "?") + ") …"));
+  }
   applyTheme(state.settings.theme || "dark");
   loadSettingsForm();
   $("#tDate").value = today();
   $("#cDate").value = today();
   $("#cSubmit").dataset.kind = $("#cSubmit").dataset.kind || "deposit";
 
-  setStatus(Prices.live ? "live" : "demo",
-    Prices.live ? "Live-Kurse (Yahoo Finance)" : "Demo-Modus – simulierte Kurse");
+  setStatus(Prices.live ? "live" : "demo", statusText());
 
+  const fehlt = Object.keys(Prices.snapshotErrors || {});
   $("#sourceInfo").innerHTML = Prices.live
-    ? "<b>Live-Modus aktiv.</b> Aktive Quellen: " + esc(Prices.sourceInfo) + ".<br><br>" +
+    ? "<b>Kurse der Sitzung.</b> Sie werden <b>einmal beim Start</b> geholt" +
+      (Prices.snapshotAt ? " (zuletzt " + new Date(Prices.snapshotAt).toLocaleString("de-DE") + ")" : "") +
+      " und gelten dann unverändert, bis du im Depot auf <b>„Kurse aktualisieren“</b> drückst oder " +
+      "den Server neu startest. Damit läuft während des Handelns keine Abfrage mehr ins Leere: " +
+      "Yahoo drosselt sonst mitten in der Ordermaske." +
+      (fehlt.length ? "<br><br><b>Beim Startabruf ohne Kurs geblieben:</b> " + esc(fehlt.join(", ")) +
+        " – „Kurse aktualisieren“ holt sie später nach." : "") +
+      "<br><br>Aktive Quellen: " + esc(Prices.sourceInfo) + ".<br><br>" +
       "Abgefragt wird der Reihe nach: <b>Yahoo Finance</b> (ohne Schlüssel, breiteste Abdeckung — " +
       "Tagesschlusskurse, um Ausschüttungen bereinigt), dann <b>Twelve Data</b>" +
       (Prices.hasTwelveData ? "" : " (nicht eingerichtet)") +
@@ -2202,8 +2317,7 @@ async function boot(skipDetect) {
     setStatus(Prices.live ? "live" : "demo", failed.length + " Kurs(e) fehlen");
     toast("Keine Kurse für: " + failed.join(", "), "err");
   } else {
-    setStatus(Prices.live ? "live" : "demo",
-      Prices.live ? "Live-Kurse (Yahoo Finance)" : "Demo-Modus – simulierte Kurse");
+    setStatus(Prices.live ? "live" : "demo", statusText());
   }
 
   refreshAll();

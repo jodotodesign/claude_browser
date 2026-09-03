@@ -35,12 +35,25 @@ der Einheitlichkeit halber ebenfalls durchgereicht.
 
 | Endpunkt | Zweck |
 |---|---|
-| `/api/status` | Erkennung Live- vs. Demo-Modus |
-| `/api/history?symbol=&range=&interval=` | Tagesschlusskurse (adjclose), Metadaten |
+| `/api/status` | Erkennung Live- vs. Demo-Modus, Stand des Sitzungsspeichers |
+| `/api/snapshot` | Fortschritt des Startabrufs; mit `?full=1` alle Kurse und Wechselkurse auf einmal |
+| `/api/history?symbol=&range=&interval=` | Tagesschlusskurse (adjclose), Metadaten — `range`/`interval` werden entgegengenommen, aber nicht beachtet |
 | `/api/quote?symbols=A,B,C` | aktueller Kurs + Vortagesschluss |
 | `/api/search?q=` | Symbolsuche (Name, Ticker, ISIN) |
-| `/api/fx?base=USD&start=` | Tagesreihe Fremdwährung → EUR |
+| `/api/fx?base=USD&start=` | Tagesreihe Fremdwährung → EUR (`start` wird nicht beachtet) |
 | `GET/POST /api/state` | Depot lesen/schreiben (`depot.json` im Projektordner) |
+| `POST /api/refresh` | Startabruf noch einmal ausführen (Knopf „Kurse aktualisieren“) |
+
+**Sitzungsspeicher** (`_session`, `session_history()`, `session_fx()`): Kurse werden **einmal beim
+Start** geholt — `warmup()` läuft als Hintergrundfaden über die Symbole des Depots (aus `depot.json`,
+zuerst) und den Katalog der Web-App (`catalog_symbols()` liest den `CATALOG` direkt aus
+`web_app.html`, damit es keine zweite Liste zu pflegen gibt). Danach beantworten `/api/history`,
+`/api/quote` und `/api/fx` **ohne Netzabruf** aus diesem Speicher; die TTL des Plattencaches gilt
+dort bewusst nicht. Grund: Yahoo drosselt die ganze IP, und wer jeden Kurs erst beim Bedarf holt,
+verliert genau den Abruf, auf den es ankommt — das Auswählen eines Wertpapiers in der Ordermaske.
+Ein Symbol, das im Startabruf nicht dabei war (frisch gesucht), wird beim ersten Zugriff einmal
+geholt und dann ebenfalls festgehalten. Neue Kurse gibt es nur über `POST /api/refresh` oder einen
+Neustart; nur dabei wird mit `refresh=True` auch der Plattencache übergangen.
 
 **Quellenkette** (`PROVIDERS`): `_yahoo_history` → `_twelvedata_history` → `_coingecko_history`.
 `yahoo_history()` (Name historisch) probiert sie der Reihe nach durch und liefert notfalls
@@ -86,6 +99,8 @@ rückdatierte Buchungen und das Löschen einzelner Buchungen konsistent möglich
 | Baustein | Aufgabe |
 |---|---|
 | `Prices` (IIFE) | Kursbeschaffung, Demo-Generator, FX, Cache, `priceAt()`/`fxAt()` mit Vorwärtsfüllung |
+| `Prices.preload()` | Startabruf des Servers abwarten (Fortschritt in der Statusanzeige) und alle Kurse in einem Zug übernehmen |
+| `Prices.reload()` | `POST /api/refresh` und alles Gespeicherte verwerfen — der einzige Weg zu neuen Kursen innerhalb einer Sitzung |
 | `replay(upToDate)` | Journal → Barmittel, Positionen, realisiertes Ergebnis zu einem Stichtag |
 | `snapshot()` | Heutige Bewertung: Marktwert, G/V, Tagesveränderung je Position |
 | `valueSeries()` | Tagesreihe Gesamtwert + Nettoeinzahlung ab der ersten Buchung |
@@ -105,6 +120,13 @@ Weitere nicht offensichtliche Punkte:
   Gebührenmodellen.
 - **Fremdwährung**: Bewertung immer in EUR. Für historische Punkte wird der EZB-Kurs **des
   jeweiligen Tages** benutzt (`fxAt`), für die heutige Bewertung `fxNow`.
+- **Kurse stehen für die Sitzung fest**: `boot()` ruft `Prices.preload()` **vor** allem anderen auf;
+  danach kommen Ordermaske, Depot und Marktansicht ohne einen einzigen Kursabruf aus. Nur ein neu
+  gesuchtes Symbol löst noch `Prices.history()` mit Netzabruf aus (einmalig, danach hält es der
+  Server fest). Die Statusanzeige nennt darum den Zeitpunkt des Abrufs (`statusText()`) statt
+  „live“, und der Knopf **Kurse aktualisieren** im Depot ruft `Prices.reload()` + `boot(true)` auf.
+  Antwortet der Server nicht auf `/api/snapshot` (alte Version), gibt `preload()` `false` zurück und
+  alles läuft wie zuvor über Einzelabrufe.
 - **Speicher, zwei Orte**: `localStorage` (`fd_state_v1` Journal, `fd_prices_v1` Kurscache mit max.
   24 Symbolen und 1 Stunde) **und** `depot.json` über `FileStore`. `saveState()` setzt
   `state.updatedAt` und stößt einen Sammel-Timer (600 ms) an, damit mehrere Buchungen kurz
@@ -124,7 +146,8 @@ gekauft werden kann jedes Symbol, das Yahoo kennt.
 
 ## Prüfliste nach Änderungen
 
-1. `python3 server.py` starten, `http://localhost:8777` öffnen → Statusanzeige muss „Live-Kurse“ zeigen
+1. `python3 server.py` starten, `http://localhost:8777` öffnen → Statusanzeige zählt „lade Kurse (n/28)“
+   hoch und steht danach auf „Kurse vom … · Sitzung“
 2. Einstellungen → „Beispiel-Depot laden“ → Übersicht zeigt Kurve über drei Jahre mit echten Kursen
 3. Kasse: Einzahlung buchen → Barmittel steigen; Auszahlung über den Bestand hinaus wird abgelehnt
 4. Handeln: Symbol suchen, Datum in der Vergangenheit setzen → Kurs füllt sich automatisch
@@ -136,6 +159,9 @@ gekauft werden kann jedes Symbol, das Yahoo kennt.
 9b. Speicherung: Buchung anlegen → `depot.json` enthält sie; `localStorage.clear()` + Neuladen →
    Depot kommt aus der Datei zurück; Datei mit höherem `updatedAt` schreiben → Toast meldet die
    Übernahme; ohne Server geöffnet → Hinweis nennt nur den `localStorage`
+9c. Sitzungsspeicher: in der Ordermaske nacheinander mehrere Symbole auswählen und die Ansicht
+   „Märkte“ öffnen → im Serverprotokoll erscheint **kein** neuer Abruf, nur `/api/…`-Zeilen des
+   Browsers; „Kurse aktualisieren“ im Depot lädt sichtbar neu und setzt den Zeitstempel oben hoch
 10. Hell/Dunkel umschalten → Diagrammfarben wechseln mit
 11. `web_app.html` per `file://` öffnen → Demo-Modus, alles bedienbar
 
@@ -144,3 +170,5 @@ gekauft werden kann jedes Symbol, das Yahoo kennt.
 - Keine Dividenden als Kassenzufluss (Kurse sind aber um Ausschüttungen bereinigt, `adjclose`).
 - Keine Steuern, kein Spread, keine Teilausführung; Order werden zum Tagesschlusskurs gebucht.
 - Yahoo-Kurse sind verzögert und ohne Gewähr.
+- Kurse werden innerhalb einer Sitzung **nicht** nachgeführt: gezeigt wird der Stand des Startabrufs,
+  bis „Kurse aktualisieren“ gedrückt oder der Server neu gestartet wird.

@@ -7,6 +7,11 @@ Access-Control-Allow-Origin-Header, ein direkter fetch() aus dem Browser
 wird daher blockiert. Dieser Server holt die Kursdaten serverseitig und
 reicht sie unter /api/... an die Web-App weiter.
 
+Kursdaten werden **einmal beim Start** geholt und danach fuer die ganze
+Sitzung unveraendert weitergereicht (Sitzungsspeicher, siehe unten). Wer
+mitten im Handeln neue Kurse will, drueckt im Depot "Kurse aktualisieren"
+(POST /api/refresh).
+
 Nur Python-Standardbibliothek, keine Installation noetig.
 
     python3 server.py            # startet auf http://localhost:8777
@@ -16,6 +21,7 @@ Nur Python-Standardbibliothek, keine Installation noetig.
 import http.server
 import json
 import os
+import re
 import socketserver
 import ssl
 import sys
@@ -37,8 +43,10 @@ FRANKFURTER = "https://api.frankfurter.dev/v1"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
-# Gueltigkeitsdauer in Sekunden je Schluesselpraefix
-TTL = {"hist": 900, "quote": 60, "search": 604800, "fx": 3600}
+# Gueltigkeitsdauer des Plattencaches in Sekunden je Schluesselpraefix.
+# Fuer die laufende Sitzung spielt sie keine Rolle – dort gilt der
+# Sitzungsspeicher weiter unten; sie greift beim naechsten Start.
+TTL = {"hist": 900, "search": 604800, "fx": 3600}
 
 CACHE_DIR = os.path.join(BASE_DIR, ".cache")
 
@@ -408,10 +416,14 @@ PROVIDERS = [("yahoo", _yahoo_history),
              ("coingecko", _coingecko_history)]
 
 
-def yahoo_history(symbol, rng="10y", interval="1d"):
-    """Kursreihe eines Symbols – probiert alle Quellen der Reihe nach."""
+def yahoo_history(symbol, rng="10y", interval="1d", refresh=False):
+    """Kursreihe eines Symbols – probiert alle Quellen der Reihe nach.
+
+    Mit refresh=True wird der Plattencache uebergangen (nur beim
+    ausdruecklichen Neuladen ueber /api/refresh).
+    """
     key = "hist:%s:%s:%s" % (symbol, rng, interval)
-    hit = cache_get(key)
+    hit = None if refresh else cache_get(key)
     if hit:
         return hit
 
@@ -437,29 +449,6 @@ def yahoo_history(symbol, rng="10y", interval="1d"):
     if stale:                        # lieber aeltere Kurse als gar keine
         return dict(stale, stale=True)
     raise ValueError(" | ".join(errors) or "Keine Quelle lieferte Daten")
-
-
-def yahoo_quote(symbol):
-    key = "quote:%s" % symbol
-    hit = cache_get(key)
-    if hit:
-        return hit
-    hist = yahoo_history(symbol, "5d", "1d")
-    pts = hist["points"]
-    price = hist.get("price")
-    if price is None and pts:
-        price = pts[-1][1]
-    prev = hist.get("previousClose")
-    if prev is None and len(pts) >= 2:
-        prev = pts[-2][1]
-    out = {
-        "symbol": hist["symbol"], "name": hist["name"],
-        "currency": hist["currency"], "price": price,
-        "previousClose": prev, "source": hist.get("source"),
-        "date": pts[-1][0] if pts else None,
-    }
-    cache_put(key, out)
-    return out
 
 
 # Yahoo-Suffix je Boersenplatz, um Twelve-Data-Treffer auf unsere
@@ -523,14 +512,14 @@ def yahoo_search(query):
 
 # ------------------------------------------------------------ Waehrung
 
-def fx_series(base, start):
+def fx_series(base, start, refresh=False):
     """Tageskurse base -> EUR ab start (YYYY-MM-DD), inkl. aktuellem Kurs."""
     base = base.upper()
     if base == "EUR":
         return {"base": "EUR", "latest": 1.0, "rates": {}}
 
     key = "fx:%s:%s" % (base, start)
-    hit = cache_get(key)
+    hit = None if refresh else cache_get(key)
     if hit:
         return hit
 
@@ -594,6 +583,208 @@ def write_state(data):
         os.replace(tmp, STATE_FILE)
 
 
+# ------------------------------------------------------ Sitzungsspeicher
+# Kursdaten werden **einmal beim Start** geholt und danach unveraendert
+# weitergereicht, bis der Server neu startet oder /api/refresh aufgerufen
+# wird. Grund: Yahoo drosselt bei vielen Abrufen die ganze IP-Adresse. Wer
+# jeden Kurs erst dann holt, wenn er gebraucht wird, verliert genau den
+# Abruf, auf den es ankommt – etwa beim Auswaehlen eines Wertpapiers in der
+# Ordermaske. Was einmal im Sitzungsspeicher liegt, verfaellt deshalb nicht;
+# die TTL des Plattencaches gilt hier bewusst nicht.
+
+SESSION_RANGE = "10y"          # Zeitraum, der je Symbol einmal geholt wird
+
+_session = {
+    "hist": {},                # Symbol -> Kursreihe
+    "fx": {},                  # Waehrung -> Tagesreihe nach EUR
+    "errors": {},              # Symbol -> Fehler des Startabrufs
+    "loading": False,
+    "done": 0,
+    "total": 0,
+    "loadedAt": 0.0,
+}
+_session_lock = threading.Lock()
+_entry_locks = {}
+
+
+def _entry_lock(name):
+    """Je Symbol eine Sperre – zwei gleichzeitige Anfragen, ein Abruf."""
+    with _session_lock:
+        return _entry_locks.setdefault(name, threading.Lock())
+
+
+def session_history(symbol, refresh=False):
+    """Kursreihe aus dem Sitzungsspeicher; holt sie nur beim ersten Mal."""
+    if not refresh:
+        with _session_lock:
+            hit = _session["hist"].get(symbol)
+        if hit:
+            return hit
+
+    with _entry_lock("hist:" + symbol):
+        if not refresh:
+            with _session_lock:
+                hit = _session["hist"].get(symbol)
+            if hit:
+                return hit
+        data = dict(yahoo_history(symbol, SESSION_RANGE, "1d", refresh=refresh),
+                    fetchedAt=time.time())
+        with _session_lock:
+            _session["hist"][symbol] = data
+            _session["errors"].pop(symbol, None)
+        return data
+
+
+def fx_start():
+    """Frueheste Buchung im Depot, mindestens aber zehn Jahre zurueck."""
+    earliest = (date.today() - timedelta(days=365 * 10 + 30)).isoformat()
+    for txn in (read_state() or {}).get("transactions") or []:
+        day = txn.get("date")
+        if isinstance(day, str) and len(day) == 10 and day < earliest:
+            earliest = day
+    return earliest
+
+
+def session_fx(base, refresh=False):
+    """Wechselkursreihe aus dem Sitzungsspeicher – Startdatum deckt alles ab."""
+    base = (base or "EUR").upper()
+    if base == "EUR":
+        return {"base": "EUR", "latest": 1.0, "rates": {}}
+    if not refresh:
+        with _session_lock:
+            hit = _session["fx"].get(base)
+        if hit:
+            return hit
+
+    with _entry_lock("fx:" + base):
+        if not refresh:
+            with _session_lock:
+                hit = _session["fx"].get(base)
+            if hit:
+                return hit
+        out = fx_series(base, fx_start(), refresh=refresh)
+        with _session_lock:
+            _session["fx"][base] = out
+        return out
+
+
+def session_quote(symbol):
+    """Aktueller Kurs – aus der Sitzungsreihe, ohne neuen Netzabruf."""
+    hist = session_history(symbol)
+    pts = hist["points"]
+    price = hist.get("price")
+    if price is None and pts:
+        price = pts[-1][1]
+    prev = hist.get("previousClose")
+    if prev is None and len(pts) >= 2:
+        prev = pts[-2][1]
+    return {
+        "symbol": hist["symbol"], "name": hist["name"],
+        "currency": hist["currency"], "price": price,
+        "previousClose": prev, "source": hist.get("source"),
+        "date": pts[-1][0] if pts else None,
+    }
+
+
+# Notliste, falls der CATALOG in web_app.html nicht gelesen werden kann
+FALLBACK_SYMBOLS = ["EUNL.DE", "VWCE.DE", "SXR8.DE", "4GLD.DE", "GC=F",
+                    "SAP.DE", "AAPL", "MSFT", "BTC-EUR", "^GDAXI"]
+
+
+def catalog_symbols():
+    """Symbole aus dem CATALOG der Web-App lesen – keine zweite Liste pflegen."""
+    try:
+        with open(os.path.join(BASE_DIR, "web_app.html"), "r", encoding="utf-8") as fh:
+            block = fh.read().split("const CATALOG = [", 1)[1].split("\n];", 1)[0]
+        syms = re.findall(r'\{\s*s\s*:\s*"([^"]+)"', block)
+    except Exception:
+        syms = []
+    return syms or list(FALLBACK_SYMBOLS)
+
+
+def warmup_symbols():
+    """Erst die gehaltenen Positionen, dann der Katalog der Marktansicht."""
+    syms = []
+    for txn in (read_state() or {}).get("transactions") or []:
+        sym = txn.get("symbol")
+        if sym and sym not in syms:
+            syms.append(sym)
+    for sym in catalog_symbols():
+        if sym not in syms:
+            syms.append(sym)
+    return syms
+
+
+def warmup(force=False):
+    """Startabruf: alle Symbole der Reihe nach in den Sitzungsspeicher."""
+    syms = warmup_symbols()
+    with _session_lock:
+        if _session["loading"]:
+            return False
+        _session["loading"] = True
+        _session["done"] = 0
+        _session["total"] = len(syms)
+        _session["errors"] = {}
+        if force:
+            _session["hist"].clear()
+            _session["fx"].clear()
+
+    ok, currencies = 0, set()
+    try:
+        for sym in syms:
+            try:
+                hist = session_history(sym, refresh=force)
+                cur = (hist.get("currency") or "EUR").upper()
+                if cur not in currencies:
+                    currencies.add(cur)
+                    try:
+                        session_fx(cur)
+                    except Exception as exc:
+                        print("  Wechselkurs %s fehlt (%s)" % (cur, exc))
+                ok += 1
+            except Exception as exc:
+                with _session_lock:
+                    _session["errors"][sym] = str(exc)
+            finally:
+                with _session_lock:
+                    _session["done"] += 1
+    finally:
+        with _session_lock:
+            _session["loading"] = False
+            _session["loadedAt"] = time.time()
+    print("  Kurse der Sitzung geladen: %d von %d Symbolen" % (ok, len(syms)))
+    return True
+
+
+def start_warmup(force=False):
+    threading.Thread(target=warmup, args=(force,), daemon=True).start()
+
+
+def snapshot_meta(with_lists=True):
+    with _session_lock:
+        out = {
+            "loading": _session["loading"],
+            "done": _session["done"],
+            "total": _session["total"],
+            "loadedAt": _session["loadedAt"],
+            "range": SESSION_RANGE,
+            "count": len(_session["hist"]),
+        }
+        if with_lists:
+            out["symbols"] = sorted(_session["hist"])
+            out["currencies"] = sorted(_session["fx"])
+            out["errors"] = dict(_session["errors"])
+    return out
+
+
+def snapshot_full():
+    out = snapshot_meta()
+    with _session_lock:
+        out["history"] = dict(_session["hist"])
+        out["fx"] = dict(_session["fx"])
+    return out
+
+
 # -------------------------------------------------------------- Server
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -625,6 +816,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/refresh":
+            # Ausdrueckliches Neuladen: laeuft im Hintergrund, der Fortschritt
+            # kommt ueber /api/snapshot zurueck.
+            start_warmup(force=True)
+            return self._send(snapshot_meta(with_lists=False))
         if parsed.path != "/api/state":
             return self._send({"error": "unbekannter Endpunkt"}, 404)
         try:
@@ -663,14 +859,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     sources.append("Twelve Data")
                 sources += ["CoinGecko (Krypto)", "EZB/Frankfurter (Wechselkurse)"]
                 return self._send({"live": True, "source": " · ".join(sources),
-                                   "twelvedata": bool(config().get("twelvedata_key"))})
+                                   "twelvedata": bool(config().get("twelvedata_key")),
+                                   "mode": "session",
+                                   "snapshot": snapshot_meta(with_lists=False)})
+
+            if parsed.path == "/api/snapshot":
+                # Ohne full=1 nur der Fortschritt – die vollen Kursreihen sind
+                # einige Megabyte und werden nur einmal je Sitzung geholt.
+                if one("full") in ("1", "true", "yes"):
+                    return self._send(snapshot_full())
+                return self._send(snapshot_meta())
 
             if parsed.path == "/api/history":
                 symbol = one("symbol")
                 if not symbol:
                     return self._send({"error": "symbol fehlt"}, 400)
-                return self._send(yahoo_history(symbol, one("range", "10y"),
-                                                one("interval", "1d")))
+                # range/interval werden entgegengenommen, aber nicht beachtet:
+                # die Sitzung haelt je Symbol genau eine Reihe (SESSION_RANGE),
+                # aus der die App selbst den gewuenschten Ausschnitt schneidet.
+                return self._send(session_history(symbol))
 
             if parsed.path == "/api/quote":
                 symbols = [s for s in (one("symbols", "") or "").split(",") if s]
@@ -679,7 +886,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 out, errs = {}, {}
                 for s in symbols[:40]:
                     try:
-                        out[s] = yahoo_quote(s)
+                        out[s] = session_quote(s)
                     except Exception as exc:
                         errs[s] = str(exc)
                 return self._send({"quotes": out, "errors": errs})
@@ -697,8 +904,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                    "updatedAt": (data or {}).get("updatedAt", 0)})
 
             if parsed.path == "/api/fx":
-                return self._send(fx_series(one("base", "USD"),
-                                            one("start", "2015-01-01")))
+                # start wird nicht beachtet: die Sitzungsreihe beginnt bereits
+                # vor der aeltesten Buchung.
+                return self._send(session_fx(one("base", "USD")))
 
             return self._send({"error": "unbekannter Endpunkt"}, 404)
 
@@ -733,13 +941,16 @@ def main():
     url = "http://localhost:%d/" % port
     print("Virtuelles Finanzdashboard")
     print("  %s" % url)
-    print("  Live-Kurse via Yahoo Finance, Wechselkurse via Frankfurter (EZB)")
+    print("  Kurse via Yahoo Finance, Wechselkurse via Frankfurter (EZB)")
+    print("  Sie werden jetzt einmal geholt und gelten dann fuer die ganze")
+    print("  Sitzung – neu laden im Depot ueber \"Kurse aktualisieren\".")
     existing = read_state()
     if existing:
         print("  Depot: %s (%d Buchungen)" % (STATE_FILE, len(existing.get("transactions") or [])))
     else:
         print("  Depot wird automatisch gespeichert in %s" % STATE_FILE)
     print("  Beenden mit Strg+C\n")
+    start_warmup()                  # Kurse der Sitzung im Hintergrund holen
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
         httpd.serve_forever()
