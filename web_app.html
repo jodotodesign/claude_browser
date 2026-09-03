@@ -803,6 +803,7 @@ const Prices = (() => {
   let snapshotErrors = {};   // Symbol -> Fehler beim Startabruf
   let snapshotRetryAt = 0;   // naechster Nachversuch des Servers (ms), 0 = keiner
   let snapshotLoading = false; // Server holt gerade (Start oder Nachversuch)
+  let snapshotSources = {};  // Quellenname -> Anzahl gelieferter Symbole
   let outdated = false;      // Server laeuft noch ohne Sitzungsspeicher
   const hist = {};       // symbol -> {name,currency,cls,dates:[],map:{},price,prev}
   const fx = {};         // waehrung -> {rates:{}, latest, dates:[]}
@@ -952,6 +953,7 @@ const Prices = (() => {
                                dates: Object.keys(f.rates || {}).sort()};
     });
     snapshotErrors = j.errors || {};
+    snapshotSources = j.sources || {};
     snapshotLoading = !!j.loading;
     snapshotRetryAt = j.retryAt ? j.retryAt * 1000 : 0;
     snapshotAt = j.loadedAt ? j.loadedAt * 1000 : Date.now();
@@ -1091,6 +1093,7 @@ const Prices = (() => {
     get snapshotErrors() { return snapshotErrors; },
     get snapshotRetryAt() { return snapshotRetryAt; },
     get snapshotLoading() { return snapshotLoading; },
+    get snapshotSources() { return snapshotSources; },
     get outdated() { return outdated; },
     get loaded() { return hist; },
     meta: sym => hist[sym] || null,
@@ -2359,7 +2362,12 @@ async function boot(skipDetect) {
           new Date(Prices.snapshotRetryAt).toLocaleTimeString("de-DE",
             {hour:"2-digit", minute:"2-digit"}) + " Uhr)" : "") +
         "; „Kurse aktualisieren“ geht auch sofort." : "") +
-      "<br><br>Aktive Quellen: " + esc(Prices.sourceInfo) + ".<br><br>" +
+      "<br><br>Aktive Quellen: " + esc(Prices.sourceInfo) + "." +
+      (Object.keys(Prices.snapshotSources || {}).length
+        ? "<br><b>Geliefert hat in dieser Sitzung:</b> " +
+          esc(Object.keys(Prices.snapshotSources)
+                .map(q => q + " " + Prices.snapshotSources[q]).join(" · ")) + " Symbol(e)."
+        : "") + "<br><br>" +
       "Abgefragt wird der Reihe nach: <b>Yahoo Finance</b> (ohne Schlüssel, breiteste Abdeckung — " +
       "Tagesschlusskurse, um Ausschüttungen bereinigt), dann <b>Twelve Data</b>" +
       (Prices.hasTwelveData ? "" : " (nicht eingerichtet)") +

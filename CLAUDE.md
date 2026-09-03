@@ -55,6 +55,9 @@ Ein Symbol, das im Startabruf nicht dabei war (frisch gesucht), wird beim ersten
 geholt und dann ebenfalls festgehalten. Neue Kurse gibt es nur über `POST /api/refresh` oder einen
 Neustart; nur dabei wird mit `refresh=True` auch der Plattencache übergangen.
 
+Die Ansicht „Einstellungen“ zeigt über `sources` in `/api/snapshot`, welche Quelle wie viele
+Symbole beigesteuert hat — daran ist zu sehen, ob die Zweitquelle überhaupt einspringt.
+
 **Nachversuche**: Steht Yahoo beim Start gerade auf Sperre, fällt der ganze Abruf aus — ohne
 Gegenmaßnahme hätte das Dashboard die Sitzung über keine Kurse. `warmup()` legt darum die
 ausgefallenen Symbole auf einen Timer (`WARMUP_RETRIES`, `RETRY_WAIT`, frühestens nach Ablauf von
@@ -71,6 +74,12 @@ Eigenheiten der Zweitquellen:
   (Tabelle `TD_EXCHANGE`) und `BTC-EUR` → `BTC/EUR`. Futures (`=F`) und Indizes (`^`) kann die
   Quelle nicht, sie wirft dafür bewusst. Die **Symbolsuche** funktioniert dort ohne Schlüssel und
   dient als Ausweichquelle für `/api/search`.
+  **Kredite pro Minute**: Der kostenlose Zugang erlaubt 8 Abrufe je Minute — `throttle()` mit seinen
+  0,35 s ist dafür viel zu schnell. `td_throttle()` (gleitendes Minutenfenster, `twelvedata_rpm` in
+  `config.json`, Vorgabe 8) bremst deshalb nur diese Quelle, `td_fetch()` macht aus der
+  Kreditmeldung einen klaren Fehler statt einer leeren Kursreihe. Ohne das lieferte ein Startabruf
+  mit gesperrtem Yahoo 8 von 28 Symbolen (14 Kreditfehler), mit ihm 22 von 28 in gut zwei Minuten —
+  die übrigen sechs sind Futures und Indizes, die Twelve Data grundsätzlich nicht kennt.
 - **CoinGecko**: nur die Kürzel aus `COINS`, und der kostenlose Zugang gibt höchstens **365 Tage**
   heraus (mehr → Fehler 10012).
 

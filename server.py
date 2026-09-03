@@ -214,6 +214,46 @@ def throttle():
         _last_call[0] = time.time()
 
 
+# Twelve Data rechnet in Krediten pro Minute (kostenloser Zugang: 8). Der
+# 0,35-Sekunden-Abstand von throttle() ist dafuer viel zu schnell: Faellt Yahoo
+# aus, waeren die knapp 30 Symbole des Startabrufs in zehn Sekunden durch und
+# fast jede Antwort hiesse "You have run out of API credits". Deshalb hat die
+# Quelle ein eigenes, gleitendes Minutenfenster.
+TD_RPM_DEFAULT = 8
+_td_lock = threading.Lock()
+_td_calls = []                       # Zeitstempel der Abrufe der letzten Minute
+
+
+def td_throttle():
+    """Auf hoechstens N Abrufe je 60 s bremsen (config: twelvedata_rpm)."""
+    try:
+        limit = max(1, int(config().get("twelvedata_rpm") or TD_RPM_DEFAULT))
+    except (TypeError, ValueError):
+        limit = TD_RPM_DEFAULT
+    while True:
+        with _td_lock:
+            now = time.time()
+            _td_calls[:] = [t for t in _td_calls if now - t < 60]
+            if len(_td_calls) < limit:
+                _td_calls.append(now)
+                return
+            wait = 60 - (now - _td_calls[0]) + 0.2
+        time.sleep(min(max(wait, 0.5), 61))
+
+
+def td_fetch(url):
+    """Abruf mit Kreditgrenze – die Fehlermeldung soll die Ursache nennen."""
+    td_throttle()
+    raw = fetch_json(url)
+    msg = str(raw.get("message") or "")
+    if str(raw.get("code")) == "429" or "credits" in msg.lower():
+        # Nicht hier warten: der Startabruf versucht ausgefallene Symbole
+        # ohnehin spaeter noch einmal (warmup -> RETRY_WAIT).
+        raise ValueError("Twelve-Data-Kredite aufgebraucht (%d/min) – %s"
+                         % (int(config().get("twelvedata_rpm") or TD_RPM_DEFAULT), msg or "spaeter erneut"))
+    return raw
+
+
 # Nach einer Sperre pausiert Yahoo eine Weile komplett, damit nicht jeder
 # Abruf zwei aussichtslose Anfragen verbrennt.
 YAHOO_COOLDOWN = 180
@@ -344,8 +384,7 @@ def _twelvedata_history(symbol, rng, interval):
               "order": "ASC", "apikey": key}
     if mic:
         params["mic_code"] = mic
-    throttle()
-    raw = fetch_json("https://api.twelvedata.com/time_series?" + urllib.parse.urlencode(params))
+    raw = td_fetch("https://api.twelvedata.com/time_series?" + urllib.parse.urlencode(params))
     if str(raw.get("status")) == "error" or "values" not in raw:
         raise ValueError(raw.get("message") or "Twelve Data lieferte keine Daten")
 
@@ -458,9 +497,8 @@ MIC_SUFFIX = dict((v, k) for k, v in TD_EXCHANGE.items())
 
 def _twelvedata_search(query):
     """Symbolsuche bei Twelve Data – funktioniert auch ohne Schluessel."""
-    throttle()
-    raw = fetch_json("https://api.twelvedata.com/symbol_search?" +
-                     urllib.parse.urlencode({"symbol": query, "outputsize": 12}))
+    raw = td_fetch("https://api.twelvedata.com/symbol_search?" +
+                   urllib.parse.urlencode({"symbol": query, "outputsize": 12}))
     items, seen = [], set()
     for q in raw.get("data") or []:
         sym, mic = q.get("symbol"), q.get("mic_code")
@@ -801,6 +839,13 @@ def snapshot_meta(with_lists=True):
             out["symbols"] = sorted(_session["hist"])
             out["currencies"] = sorted(_session["fx"])
             out["errors"] = dict(_session["errors"])
+            # Wer welche Quelle geliefert hat – sichtbar machen, ob die
+            # Zweitquelle ueberhaupt einspringt
+            counts = {}
+            for entry in _session["hist"].values():
+                name = entry.get("source") or "unbekannt"
+                counts[name] = counts.get(name, 0) + 1
+            out["sources"] = counts
     return out
 
 
