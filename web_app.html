@@ -802,6 +802,7 @@ const Prices = (() => {
   let snapshotAt = 0;        // Zeitpunkt des Startabrufs (ms), 0 = keiner
   let snapshotErrors = {};   // Symbol -> Fehler beim Startabruf
   let snapshotRetryAt = 0;   // naechster Nachversuch des Servers (ms), 0 = keiner
+  let snapshotLoading = false; // Server holt gerade (Start oder Nachversuch)
   let outdated = false;      // Server laeuft noch ohne Sitzungsspeicher
   const hist = {};       // symbol -> {name,currency,cls,dates:[],map:{},price,prev}
   const fx = {};         // waehrung -> {rates:{}, latest, dates:[]}
@@ -951,6 +952,7 @@ const Prices = (() => {
                                dates: Object.keys(f.rates || {}).sort()};
     });
     snapshotErrors = j.errors || {};
+    snapshotLoading = !!j.loading;
     snapshotRetryAt = j.retryAt ? j.retryAt * 1000 : 0;
     snapshotAt = j.loadedAt ? j.loadedAt * 1000 : Date.now();
     return true;
@@ -1088,6 +1090,7 @@ const Prices = (() => {
     get snapshotAt() { return snapshotAt; },
     get snapshotErrors() { return snapshotErrors; },
     get snapshotRetryAt() { return snapshotRetryAt; },
+    get snapshotLoading() { return snapshotLoading; },
     get outdated() { return outdated; },
     get loaded() { return hist; },
     meta: sym => hist[sym] || null,
@@ -1654,15 +1657,38 @@ async function selectAsset(symbol) {
   $("#selPrice").textContent = "…";
   $("#assetChart").innerHTML = '<div class="empty">lade …</div>';
 
-  let h;
+  let h = null, kursFehler = null;
   try { h = await Prices.history(symbol); }
-  catch (e) {
-    toast("Keine Kursdaten für " + symbol + ": " + e.message +
-          " – im Depot „Kurse aktualisieren“ holt den Startabruf nach.", "err");
-    $("#selBox").style.display = "none";
-    $("#tEmptyHint").style.display = "";
+  catch (e) { kursFehler = e.message; }
+
+  /* Ohne Kurse ist die Buchung trotzdem moeglich – das Journal ist die einzige
+     Wahrheit, der Kurs nur ein Feld darin. Frueher verschwand die halb
+     geoeffnete Ordermaske wieder, sobald der Abruf scheiterte; wer handeln
+     wollte, stand vor einer leeren Seite. */
+  if (!h) {
+    const cat = catalogBySymbol[symbol] || {};
+    const bekannt = state.meta[symbol] || {};
+    sel = {symbol: symbol, name: bekannt.name || cat.n || symbol,
+           currency: bekannt.currency || "EUR", cls: bekannt.cls || cat.c || "sonstige"};
+    $("#selName").textContent = sel.name;
+    $("#selPrice").textContent = "–";
+    $("#selChange").innerHTML = '<span class="muted">Kurs nicht abrufbar – bitte unten von Hand ' +
+      "eintragen</span>";
+    $("#selClass").innerHTML = '<span class="swatch" style="background:' + classOf(sel.cls).color +
+      '"></span>' + classOf(sel.cls).label;
+    $("#selCur").textContent = "Handelswährung " + sel.currency;
+    $("#assetChart").innerHTML = '<div class="empty">Kein Kursverlauf verfügbar.<br>' +
+      "Die Buchung geht trotzdem – trage den Kurs unten selbst ein.</div>";
+    toast("Keine Kursdaten für " + symbol + ": " + kursFehler +
+          " – du kannst den Kurs von Hand eintragen; der Server versucht es weiter.", "err");
+    if (!$("#tDate").value) $("#tDate").value = today();
+    $("#tPrice").value = "";                 // nicht den Kurs des vorherigen Werts stehen lassen
+    $("#tPrice").focus();
+    updatePreview();
+    renderTradeKpis();
     return;
   }
+
   await Prices.fxSeries(h.currency, h.dates[0] || "2015-01-01");
 
   sel = {symbol: symbol, name: h.name, currency: h.currency, cls: h.cls};
@@ -2166,13 +2192,17 @@ function setStatus(kind, text) {
 /* Was beim Startabruf ausgefallen ist (meist eine Yahoo-Sperre), versucht der
    Server von selbst noch einmal. Hier wird das Ergebnis eingesammelt, damit
    niemand die Seite neu laden oder einen Knopf suchen muss. */
-let recheckTimer = null;
-function scheduleRecheck() {
+let recheckTimer = null, recheckLeft = 0;
+function scheduleRecheck(neu) {
   clearTimeout(recheckTimer);
-  if (!Prices.live) return;
-  const fehlt = Object.keys(Prices.snapshotErrors || {}).length;
-  if (!fehlt || !Prices.snapshotRetryAt) return;
-  const wait = Math.min(Math.max(Prices.snapshotRetryAt - Date.now() + 8000, 15000), 900000);
+  if (neu) recheckLeft = 24;              // Obergrenze, damit nichts ewig pollt
+  if (!Prices.live || recheckLeft-- <= 0) return;
+  // Waehrend eines Nachversuchs meldet der Server kurz "keine Fehler", obwohl
+  // noch Symbole fehlen – deshalb zaehlt auch das laufende Holen als Grund.
+  if (!Object.keys(Prices.snapshotErrors || {}).length && !Prices.snapshotLoading) return;
+  const wait = Prices.snapshotRetryAt
+    ? Math.min(Math.max(Prices.snapshotRetryAt - Date.now() + 8000, 15000), 900000)
+    : 15000;
   recheckTimer = setTimeout(async () => {
     const vorher = Object.keys(Prices.loaded).length;
     await Prices.take();
@@ -2181,6 +2211,8 @@ function scheduleRecheck() {
       setStatus("live", statusText());
       toast(dazu + " nachgeholte Kurs(e) übernommen", "ok");
       refreshAll();
+      // War ein Wertpapier ohne Kurse gewaehlt, bekommt es jetzt seinen Verlauf
+      if (sel && Prices.meta(sel.symbol)) selectAsset(sel.symbol);
     }
     scheduleRecheck();
   }, wait);
@@ -2381,7 +2413,7 @@ async function boot(skipDetect) {
   }
 
   refreshAll();
-  scheduleRecheck();
+  scheduleRecheck(true);
 }
 
 loadState();

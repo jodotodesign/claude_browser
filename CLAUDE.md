@@ -137,8 +137,14 @@ Weitere nicht offensichtliche Punkte:
   liefert `web_app.html` bei jedem Aufruf frisch von der Platte, **seinen eigenen Code aber nur beim
   Start** — wer nur die Dateien austauscht, hat die neue Oberfläche vor dem alten Server.
 - **Nachgeholte Kurse**: `scheduleRecheck()` holt den Abzug später noch einmal (`Prices.take()`),
-  solange `snapshotErrors` gefüllt ist und der Server einen `retryAt` meldet. Neu angekommene
-  Symbole werden übernommen und die Ansicht neu gezeichnet, ohne dass jemand etwas drücken muss.
+  solange `snapshotErrors` gefüllt ist **oder** der Server noch holt (`loading`) — während eines
+  Nachversuchs meldet er kurzzeitig „keine Fehler“, obwohl Symbole fehlen. Neu angekommene Symbole
+  werden übernommen, die Ansicht neu gezeichnet und ein offenes Wertpapier in der Ordermaske
+  nachgezogen, ohne dass jemand etwas drücken muss (max. 24 Versuche).
+- **Ordermaske ohne Kurse**: Scheitert `Prices.history()` in `selectAsset()`, bleibt die Maske
+  trotzdem stehen — Name und Klasse kommen aus `state.meta`/`CATALOG`, der Kurs wird von Hand
+  eingetragen. Das Journal ist die einzige Wahrheit, der Kurs nur ein Feld darin; vorher verschwand
+  die halb geöffnete Maske wieder und Handeln war ohne Yahoo unmöglich.
 - **Speicher, zwei Orte**: `localStorage` (`fd_state_v1` Journal, `fd_prices_v1` Kurscache mit max.
   24 Symbolen und 1 Stunde) **und** `depot.json` über `FileStore`. `saveState()` setzt
   `state.updatedAt` und stößt einen Sammel-Timer (600 ms) an, damit mehrere Buchungen kurz
@@ -177,6 +183,9 @@ gekauft werden kann jedes Symbol, das Yahoo kennt.
 9d. Alter Server: `web_app.html` austauschen, aber den vorher gestarteten Server weiterlaufen lassen
    → Banner „Der laufende Server kennt den Sitzungsspeicher noch nicht“, Statusanzeige „Server
    veraltet“ (nicht still auf Einzelabrufe zurückfallen)
+9e. Ohne Kurse handeln: Server mit gesperrter Quelle starten → Ordermaske bleibt stehen, Kurs lässt
+   sich von Hand eintragen, Buchung geht durch; sobald der Nachversuch greift, füllen sich Kurs und
+   Verlauf von selbst
 10. Hell/Dunkel umschalten → Diagrammfarben wechseln mit
 11. `web_app.html` per `file://` öffnen → Demo-Modus, alles bedienbar
 
