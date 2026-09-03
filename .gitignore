@@ -1,0 +1,5 @@
+.cache/
+depot.json
+depot.backup.json
+depot.json.tmp
+config.json

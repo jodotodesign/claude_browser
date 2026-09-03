@@ -1,0 +1,2217 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Virtuelles Finanzdashboard</title>
+<style>
+/* ============================================================ Theme */
+:root{
+  --bg:#0d1117; --bg-2:#141b24; --card:#161d27; --card-2:#1c2531;
+  --line:#26303d; --line-2:#334051;
+  --fg:#e7edf5; --fg-2:#9dabbd; --fg-3:#6b7a8d;
+  --accent:#4f8cff; --accent-2:#2f6fe0;
+  --up:#2ecc8f; --down:#ff5f6d; --gold:#e0a83c; --violet:#a778f0;
+  --shadow:0 8px 24px rgba(0,0,0,.35);
+  --r:12px;
+}
+:root[data-theme="light"]{
+  --bg:#f2f5f9; --bg-2:#e9eef5; --card:#ffffff; --card-2:#f6f8fb;
+  --line:#dde4ee; --line-2:#c8d3e2;
+  --fg:#16202c; --fg-2:#5b6b80; --fg-3:#8494a8;
+  --accent:#2f6fe0; --accent-2:#1d55bd;
+  --up:#12996a; --down:#d93a4a; --gold:#b8801d; --violet:#7c4fd0;
+  --shadow:0 6px 18px rgba(22,38,60,.10);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--fg); min-height:100vh;
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3,h4{margin:0;font-weight:650;letter-spacing:-.01em}
+a{color:var(--accent)}
+.mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+/* =========================================================== Layout */
+.app{max-width:1360px;margin:0 auto;padding:0 20px 64px}
+header.top{
+  position:sticky;top:0;z-index:40;background:rgba(13,17,23,.86);
+  backdrop-filter:blur(12px);border-bottom:1px solid var(--line);margin:0 -20px 22px;padding:0 20px;
+}
+:root[data-theme="light"] header.top{background:rgba(242,245,249,.88)}
+.top-row{display:flex;align-items:center;gap:16px;padding:14px 0 12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:11px;margin-right:auto}
+.logo{
+  width:34px;height:34px;border-radius:9px;flex:0 0 auto;
+  background:linear-gradient(140deg,var(--accent),var(--violet));
+  display:grid;place-items:center;color:#fff;font-weight:800;font-size:15px;
+}
+.brand h1{font-size:17px}
+.brand .sub{font-size:11.5px;color:var(--fg-3);letter-spacing:.02em}
+.status{
+  display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--fg-2);
+  border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--card);white-space:nowrap;
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--fg-3);flex:0 0 auto}
+.dot.live{background:var(--up);box-shadow:0 0 0 3px rgba(46,204,143,.18)}
+.dot.demo{background:var(--gold);box-shadow:0 0 0 3px rgba(224,168,60,.18)}
+.dot.busy{background:var(--accent);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.3}}
+
+nav.tabs{display:flex;gap:2px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+nav.tabs::-webkit-scrollbar{display:none}
+nav.tabs button{
+  background:none;border:0;border-bottom:2px solid transparent;color:var(--fg-2);
+  padding:10px 14px;cursor:pointer;font-size:14px;font-weight:550;white-space:nowrap;border-radius:6px 6px 0 0;
+}
+nav.tabs button:hover{color:var(--fg);background:var(--card)}
+nav.tabs button.active{color:var(--fg);border-bottom-color:var(--accent)}
+
+.view{display:none;animation:fade .18s ease}
+.view.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(3px)}}
+
+/* ============================================================ Cards */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.card + .card{margin-top:16px}
+.card-head{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.card-head h3{font-size:15px}
+.card-head .spacer{margin-left:auto}
+.muted{color:var(--fg-2)}
+.tiny{font-size:12px}
+.hint{font-size:12.5px;color:var(--fg-3);line-height:1.55}
+
+.grid{display:grid;gap:16px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.cols-2{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.cols-32{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
+@media(max-width:900px){.cols-2,.cols-32{grid-template-columns:1fr}}
+
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:15px 16px}
+.kpi .label{font-size:12px;color:var(--fg-2);display:flex;align-items:center;gap:6px}
+.kpi .value{font-size:25px;font-weight:680;margin-top:6px;letter-spacing:-.02em}
+.kpi .delta{font-size:12.5px;margin-top:4px;color:var(--fg-3)}
+.kpi.hero{background:linear-gradient(150deg,var(--card-2),var(--card));border-color:var(--line-2)}
+
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--fg-2)}
+
+/* =========================================================== Inputs */
+label.f{display:block;font-size:12px;color:var(--fg-2);margin-bottom:5px;font-weight:550}
+input,select,textarea{
+  width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:9px;
+  padding:9px 11px;outline:none;transition:border-color .12s,box-shadow .12s;
+}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,140,255,.16)}
+input[readonly]{color:var(--fg-2)}
+.field{margin-bottom:12px}
+.row{display:grid;gap:12px}
+.row.c2{grid-template-columns:1fr 1fr}
+.row.c3{grid-template-columns:1fr 1fr 1fr}
+@media(max-width:640px){.row.c2,.row.c3{grid-template-columns:1fr}}
+
+.btn{
+  background:var(--card-2);border:1px solid var(--line-2);border-radius:9px;padding:9px 15px;
+  cursor:pointer;font-weight:560;font-size:13.5px;transition:.12s;white-space:nowrap;
+}
+.btn:hover{border-color:var(--accent);color:var(--fg)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-2)}
+.btn.buy{background:var(--up);border-color:var(--up);color:#04231a}
+.btn.sell{background:var(--down);border-color:var(--down);color:#2b0509}
+.btn.ghost{background:none}
+.btn.sm{padding:5px 10px;font-size:12.5px;border-radius:7px}
+.btn.danger{color:var(--down);border-color:var(--line-2)}
+.btn.danger:hover{border-color:var(--down)}
+.btn-row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+
+.seg{display:inline-flex;background:var(--bg-2);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px}
+.seg button{background:none;border:0;border-radius:6px;padding:6px 12px;cursor:pointer;color:var(--fg-2);font-size:13px;font-weight:550}
+.seg button.active{background:var(--card);color:var(--fg);box-shadow:var(--shadow)}
+.seg.tiny button{padding:4px 9px;font-size:12px}
+
+.pill{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;
+  padding:2px 9px;font-size:11.5px;color:var(--fg-2);background:var(--bg-2);white-space:nowrap}
+.pill .swatch{width:8px;height:8px;border-radius:3px}
+
+/* =========================================================== Tables */
+.tbl-wrap{overflow-x:auto;margin:0 -18px;padding:0 18px}
+table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
+th{
+  text-align:right;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-3);
+  font-weight:600;padding:0 10px 9px;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+th:first-child,td:first-child{text-align:left;padding-left:2px}
+th.l,td.l{text-align:left}
+td{padding:11px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+tbody tr:hover{background:var(--card-2)}
+tbody tr:last-child td{border-bottom:0}
+.sym{font-weight:620}
+.nm{font-size:12px;color:var(--fg-3);max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{text-align:center;color:var(--fg-3);padding:34px 12px;font-size:13.5px;line-height:1.7}
+
+/* =========================================================== Charts */
+.chart-wrap{position:relative;width:100%}
+.chart-wrap svg{display:block;width:100%;overflow:visible}
+.tip{
+  position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--line-2);
+  border-radius:9px;padding:8px 11px;font-size:12.5px;box-shadow:var(--shadow);opacity:0;
+  transition:opacity .1s;z-index:5;white-space:nowrap;
+}
+.tip b{display:block;font-size:11.5px;color:var(--fg-3);font-weight:600;margin-bottom:4px}
+.tip .r{display:flex;align-items:center;gap:7px;justify-content:space-between;gap:16px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--fg-2);margin-top:10px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:11px;height:3px;border-radius:2px;display:inline-block}
+
+.alloc{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.alloc-list{flex:1 1 210px;min-width:0;display:flex;flex-direction:column;gap:9px}
+.alloc-row{display:flex;align-items:center;gap:9px;font-size:13px}
+.alloc-row .swatch{width:10px;height:10px;border-radius:3px;flex:0 0 auto}
+.alloc-row .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alloc-row .p{color:var(--fg-2);font-size:12.5px}
+
+/* ======================================================== Suchfeld */
+.search-box{position:relative}
+.results{
+  position:absolute;top:calc(100% + 5px);left:0;right:0;background:var(--card);
+  border:1px solid var(--line-2);border-radius:10px;box-shadow:var(--shadow);
+  max-height:290px;overflow-y:auto;z-index:30;display:none;
+}
+.results.open{display:block}
+.results button{
+  display:flex;width:100%;gap:10px;align-items:center;background:none;border:0;
+  border-bottom:1px solid var(--line);padding:9px 12px;cursor:pointer;text-align:left;
+}
+.results button:hover{background:var(--card-2)}
+.results button:last-child{border-bottom:0}
+.results .s{font-weight:620;font-size:13px;min-width:78px}
+.results .n{font-size:12.5px;color:var(--fg-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* =========================================================== Modal */
+.overlay{
+  position:fixed;inset:0;background:rgba(4,8,14,.62);backdrop-filter:blur(3px);
+  display:none;align-items:center;justify-content:center;z-index:100;padding:20px;
+}
+.overlay.open{display:flex}
+.modal{
+  background:var(--card);border:1px solid var(--line-2);border-radius:15px;padding:22px;
+  width:100%;max-width:470px;box-shadow:var(--shadow);max-height:88vh;overflow-y:auto;
+}
+.modal h3{margin-bottom:4px}
+.modal .sub{font-size:12.5px;color:var(--fg-3);margin-bottom:16px}
+
+.toast{
+  position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);z-index:200;
+  background:var(--card);border:1px solid var(--line-2);border-left:3px solid var(--accent);
+  border-radius:10px;padding:11px 17px;font-size:13.5px;box-shadow:var(--shadow);
+  opacity:0;transition:.22s;pointer-events:none;max-width:88vw;
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.ok{border-left-color:var(--up)} .toast.err{border-left-color:var(--down)}
+
+.note{
+  border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:9px;
+  background:var(--bg-2);padding:11px 14px;font-size:12.5px;color:var(--fg-2);line-height:1.6;
+}
+#banner{display:none;margin:0 0 18px}
+#banner.show{display:block}
+.warnbar{
+  border:1px solid var(--line-2);border-left:4px solid var(--gold);border-radius:10px;
+  background:var(--card);padding:13px 16px;display:flex;gap:13px;align-items:flex-start;
+}
+.warnbar .ic{font-size:17px;line-height:1.3;flex:0 0 auto}
+.warnbar .tx{font-size:13px;line-height:1.6;color:var(--fg-2);min-width:0}
+.warnbar .tx b{color:var(--fg)}
+.warnbar code{
+  background:var(--bg-2);border:1px solid var(--line);border-radius:5px;
+  padding:1px 6px;font-size:12px;white-space:nowrap;
+}
+footer.disc{margin-top:26px;font-size:11.5px;color:var(--fg-3);line-height:1.6;text-align:center}
+.spark{vertical-align:middle}
+</style>
+</head>
+<body>
+
+<div class="app">
+<header class="top">
+  <div class="top-row">
+    <div class="brand">
+      <div class="logo">V</div>
+      <div>
+        <h1>Virtuelles Finanzdashboard</h1>
+        <div class="sub">Papierdepot mit echten Marktdaten</div>
+      </div>
+    </div>
+    <div class="status" id="statusPill"><span class="dot busy"></span><span id="statusText">verbinde …</span></div>
+    <button class="btn sm ghost" id="themeBtn" title="Hell / Dunkel">◐</button>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-view="overview" class="active">Übersicht</button>
+    <button data-view="depot">Depot</button>
+    <button data-view="trade">Handeln</button>
+    <button data-view="cash">Kasse</button>
+    <button data-view="markets">Märkte</button>
+    <button data-view="ledger">Verlauf</button>
+    <button data-view="settings">Einstellungen</button>
+  </nav>
+</header>
+
+<div id="banner"></div>
+
+<!-- ======================================================= Übersicht -->
+<section class="view active" id="view-overview">
+  <div class="grid kpis" id="kpis"></div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="card-head">
+      <h3>Depotentwicklung</h3>
+      <div class="spacer"></div>
+      <div class="seg tiny" id="rangeSeg">
+        <button data-range="1M">1M</button>
+        <button data-range="6M">6M</button>
+        <button data-range="1J">1J</button>
+        <button data-range="3J">3J</button>
+        <button data-range="MAX" class="active">Max</button>
+      </div>
+    </div>
+    <div class="chart-wrap" id="mainChart"></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i> Gesamtwert (Depot + Barmittel)</span>
+      <span><i style="background:var(--fg-3)"></i> Netto eingezahlt</span>
+    </div>
+  </div>
+
+  <div class="grid cols-2" style="margin-top:16px">
+    <div class="card">
+      <div class="card-head"><h3>Aufteilung nach Anlageklasse</h3></div>
+      <div class="alloc"><div id="donutClass"></div><div class="alloc-list" id="listClass"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Größte Positionen</h3></div>
+      <div class="alloc"><div id="donutPos"></div><div class="alloc-list" id="listPos"></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Gewinn &amp; Verlust je Position</h3></div>
+    <div id="pnlBars"></div>
+  </div>
+
+  <footer class="disc">
+    Simulation ohne reale Geldbewegung. Kursdaten von Yahoo Finance (verzögert), Wechselkurse von der EZB
+    über Frankfurter. Keine Anlageberatung, keine Empfehlung – historische Entwicklungen sagen nichts über
+    die Zukunft aus.
+  </footer>
+</section>
+
+<!-- =========================================================== Depot -->
+<section class="view" id="view-depot">
+  <div class="grid kpis" id="depotKpis"></div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-head">
+      <h3>Positionen</h3>
+      <div class="spacer"></div>
+      <button class="btn sm" id="refreshBtn">Kurse aktualisieren</button>
+    </div>
+    <div class="tbl-wrap"><table id="posTable"></table></div>
+  </div>
+</section>
+
+<!-- ========================================================= Handeln -->
+<section class="view" id="view-trade">
+  <div class="grid cols-32">
+    <div class="card">
+      <div class="card-head"><h3>Order erfassen</h3></div>
+
+      <div class="field">
+        <label class="f">Wertpapier · Suche nach Name, Ticker oder ISIN</label>
+        <div class="search-box">
+          <input id="symSearch" placeholder="z. B. MSCI World, Gold, Apple, SAP, IE00B4L5Y983" autocomplete="off">
+          <div class="results" id="symResults"></div>
+        </div>
+      </div>
+
+      <div id="selBox" style="display:none">
+        <div class="card" style="background:var(--bg-2);padding:13px;margin-bottom:14px">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <div style="min-width:0;flex:1">
+              <div class="sym" id="selSym">–</div>
+              <div class="nm" id="selName" style="max-width:none"></div>
+            </div>
+            <div style="text-align:right">
+              <div class="mono" style="font-size:17px;font-weight:640" id="selPrice">–</div>
+              <div class="tiny" id="selChange">–</div>
+            </div>
+          </div>
+          <div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap">
+            <span class="pill" id="selClass">–</span>
+            <span class="pill" id="selCur">–</span>
+            <span class="pill" id="selExch" style="display:none">–</span>
+          </div>
+        </div>
+
+        <div class="seg" style="margin-bottom:14px" id="sideSeg">
+          <button data-side="buy" class="active">Kaufen</button>
+          <button data-side="sell">Verkaufen</button>
+        </div>
+
+        <div class="row c2">
+          <div class="field">
+            <label class="f">Datum der Order</label>
+            <input type="date" id="tDate">
+          </div>
+          <div class="field">
+            <label class="f">Kurs an diesem Tag</label>
+            <input type="number" step="0.0001" min="0" id="tPrice">
+          </div>
+        </div>
+
+        <div class="seg tiny" style="margin-bottom:12px" id="modeSeg">
+          <button data-mode="amount" class="active">Betrag in €</button>
+          <button data-mode="qty">Stückzahl</button>
+        </div>
+
+        <div class="field" id="fAmount">
+          <label class="f">Anlagebetrag (€)</label>
+          <input type="number" step="0.01" min="0" id="tAmount" placeholder="1000">
+        </div>
+        <div class="field" id="fQty" style="display:none">
+          <label class="f">Stückzahl (Bruchstücke erlaubt)</label>
+          <input type="number" step="0.000001" min="0" id="tQty" placeholder="10">
+        </div>
+
+        <div class="field">
+          <label class="f">Notiz (optional)</label>
+          <input id="tNote" placeholder="z. B. Sparplanrate August">
+        </div>
+
+        <div class="note" id="tPreview" style="margin-bottom:14px"></div>
+        <div class="btn-row">
+          <button class="btn buy" id="tSubmit">Kauf ausführen</button>
+          <button class="btn ghost" id="tReset">Zurücksetzen</button>
+        </div>
+      </div>
+
+      <div class="hint" id="tEmptyHint">
+        Wähle oben ein Wertpapier. Du kannst auch ein Datum in der Vergangenheit setzen – der historische
+        Schlusskurs wird dann automatisch eingesetzt, und das Depot rechnet die Entwicklung bis heute durch.
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="card-head"><h3>Kursverlauf</h3><div class="spacer"></div>
+          <div class="seg tiny" id="assetRangeSeg">
+            <button data-range="6M">6M</button>
+            <button data-range="1J" class="active">1J</button>
+            <button data-range="5J">5J</button>
+            <button data-range="MAX">Max</button>
+          </div>
+        </div>
+        <div class="chart-wrap" id="assetChart"><div class="empty">Kein Wertpapier ausgewählt</div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Verfügbar</h3></div>
+        <div class="grid kpis" id="tradeKpis"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== Kasse -->
+<section class="view" id="view-cash">
+  <div class="grid cols-2">
+    <div class="card">
+      <div class="card-head"><h3>Ein- und Auszahlung</h3></div>
+      <div class="seg" style="margin-bottom:14px" id="cashSeg">
+        <button data-kind="deposit" class="active">Einzahlen</button>
+        <button data-kind="withdraw">Auszahlen</button>
+      </div>
+      <div class="row c2">
+        <div class="field"><label class="f">Betrag (€)</label>
+          <input type="number" step="0.01" min="0" id="cAmount" placeholder="1000"></div>
+        <div class="field"><label class="f">Datum</label><input type="date" id="cDate"></div>
+      </div>
+      <div class="field"><label class="f">Notiz (optional)</label>
+        <input id="cNote" placeholder="z. B. Monatliche Sparrate"></div>
+      <div class="btn-row">
+        <button class="btn primary" id="cSubmit">Buchen</button>
+        <span class="tiny muted" id="cHint"></span>
+      </div>
+      <div class="btn-row" style="margin-top:14px">
+        <span class="tiny muted">Schnell:</span>
+        <button class="btn sm" data-quick="500">+500 €</button>
+        <button class="btn sm" data-quick="1000">+1.000 €</button>
+        <button class="btn sm" data-quick="10000">+10.000 €</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Kassenbewegungen</h3></div>
+      <div class="tbl-wrap"><table id="cashTable"></table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================== Märkte -->
+<section class="view" id="view-markets">
+  <div class="card">
+    <div class="card-head">
+      <h3>Marktübersicht</h3>
+      <div class="spacer"></div>
+      <div class="seg tiny" id="marketSeg"></div>
+    </div>
+    <div class="tbl-wrap"><table id="marketTable"></table></div>
+    <div class="hint" style="margin-top:12px">
+      Kurse werden beim Öffnen geladen und für eine Stunde zwischengespeichert. Über „Kaufen“ springst du
+      mit vorbelegtem Wertpapier direkt in die Ordermaske.
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================= Verlauf -->
+<section class="view" id="view-ledger">
+  <div class="card">
+    <div class="card-head">
+      <h3>Alle Buchungen</h3>
+      <div class="spacer"></div>
+      <select id="ledgerFilter" style="width:auto">
+        <option value="all">Alle Arten</option>
+        <option value="buy">Nur Käufe</option>
+        <option value="sell">Nur Verkäufe</option>
+        <option value="cash">Nur Kasse</option>
+      </select>
+      <button class="btn sm" id="csvBtn">CSV exportieren</button>
+    </div>
+    <div class="tbl-wrap"><table id="ledgerTable"></table></div>
+  </div>
+</section>
+
+<!-- ==================================================== Einstellungen -->
+<section class="view" id="view-settings">
+  <div class="grid cols-2">
+    <div class="card">
+      <div class="card-head"><h3>Ordergebühren</h3></div>
+      <div class="row c2">
+        <div class="field"><label class="f">Modell</label>
+          <select id="sFeeMode">
+            <option value="percent">Prozent vom Volumen</option>
+            <option value="fixed">Fester Betrag je Order</option>
+            <option value="none">Keine Gebühren</option>
+          </select></div>
+        <div class="field"><label class="f">Wert</label>
+          <input type="number" step="0.01" min="0" id="sFeeValue"></div>
+      </div>
+      <div class="field"><label class="f">Mindestgebühr (€, nur bei Prozent)</label>
+        <input type="number" step="0.01" min="0" id="sFeeMin"></div>
+      <button class="btn primary" id="sSave">Speichern</button>
+      <div class="hint" style="margin-top:12px">
+        Gebühren fließen in die Anschaffungskosten ein und mindern beim Verkauf den Erlös – so wie bei
+        einem echten Broker.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Daten</h3></div>
+      <div class="btn-row">
+        <button class="btn" id="exportBtn">Depot als JSON sichern</button>
+        <button class="btn" id="importBtn">JSON einspielen</button>
+        <input type="file" id="importFile" accept="application/json,.json" style="display:none">
+      </div>
+      <div class="hint" style="margin-top:12px" id="saveHint">Speicherort wird ermittelt …</div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+      <div class="btn-row">
+        <button class="btn" id="seedBtn">Beispiel-Depot laden</button>
+        <button class="btn danger" id="resetBtn">Alles zurücksetzen</button>
+      </div>
+      <div class="hint" style="margin-top:12px">
+        Das Beispiel-Depot bucht eine Einzahlung vor drei Jahren und legt sie in Welt-ETF, Gold, S&amp;P 500
+        und zwei Einzelaktien an – gut geeignet, um die reale Marktentwicklung sofort zu sehen.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Datenquelle</h3></div>
+    <div id="sourceInfo" class="hint"></div>
+  </div>
+</section>
+</div>
+
+<div class="overlay" id="overlay"><div class="modal" id="modalBody"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ==================================================================
+   Virtuelles Finanzdashboard – Single-File-App
+   Alles rechnet sich aus dem Buchungsjournal (state.transactions);
+   Bestände und Barmittel werden nie gespeichert, sondern nachgespielt.
+   ================================================================== */
+
+/* ------------------------------------------------------- Hilfsmittel */
+const $  = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.prototype.slice.call((r || document).querySelectorAll(s));
+
+const EUR = new Intl.NumberFormat("de-DE", {style:"currency", currency:"EUR", minimumFractionDigits:2, maximumFractionDigits:2});
+const EUR0 = new Intl.NumberFormat("de-DE", {style:"currency", currency:"EUR", maximumFractionDigits:0});
+const NUM = new Intl.NumberFormat("de-DE", {minimumFractionDigits:2, maximumFractionDigits:2});
+const PCT = new Intl.NumberFormat("de-DE", {minimumFractionDigits:2, maximumFractionDigits:2});
+
+// Rundungsreste wie -0.0000001 sollen nicht als „-0,00 €“ erscheinen
+const z     = (v, eps) => (!isFinite(v) || Math.abs(v) < (eps || 0.005)) ? 0 : v;
+const eur   = v => EUR.format(z(v));
+const eur0  = v => EUR0.format(z(v, 0.5));
+const num   = (v, d) => new Intl.NumberFormat("de-DE", {minimumFractionDigits:0, maximumFractionDigits:(d===undefined?2:d)}).format(isFinite(v)?v:0);
+const pct   = v => (z(v) >= 0 ? "+" : "") + PCT.format(z(v)) + " %";
+const signed= v => (z(v) >= 0 ? "+" : "−") + EUR.format(Math.abs(z(v))).replace("-", "");
+const cls   = v => z(v, 1e-7) > 0 ? "up" : (z(v, 1e-7) < 0 ? "down" : "flat");
+const esc   = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+const iso   = d => d.toISOString().slice(0, 10);
+const today = () => iso(new Date());
+const addDays = (isoStr, n) => { const d = new Date(isoStr + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+const deDate = s => { const p = String(s).split("-"); return p.length === 3 ? p[2] + "." + p[1] + "." + p[0] : s; };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+/* CSS-Variablen aufloesen: als SVG-Praesentationsattribut ist var() nicht
+   in jeder Safari-Version zuverlaessig, deshalb echte Farbwerte einsetzen. */
+const _pal = {};
+function col(v) {
+  if (typeof v !== "string" || v.slice(0, 4) !== "var(") return v;
+  const name = v.slice(4, -1).trim();
+  if (!(name in _pal)) {
+    _pal[name] = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#8494a8";
+  }
+  return _pal[name];
+}
+function clearPalette() { Object.keys(_pal).forEach(k => delete _pal[k]); }
+
+function toast(msg, kind) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.className = "toast show " + (kind || "");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { t.className = "toast " + (kind || ""); }, 3200);
+}
+
+function modal(html) {
+  $("#modalBody").innerHTML = html;
+  $("#overlay").classList.add("open");
+}
+function closeModal() { $("#overlay").classList.remove("open"); }
+$("#overlay").addEventListener("click", e => { if (e.target.id === "overlay") closeModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeModal(); $("#symResults").classList.remove("open"); } });
+
+/* ---------------------------------------------------------- Katalog */
+const CLASSES = {
+  aktie:    {label:"Aktie",    color:"#4f8cff"},
+  etf:      {label:"ETF",      color:"#2ecc8f"},
+  rohstoff: {label:"Rohstoff", color:"#e0a83c"},
+  krypto:   {label:"Krypto",   color:"#a778f0"},
+  index:    {label:"Index",    color:"#43c9d8"},
+  anleihe:  {label:"Anleihe",  color:"#f08fb0"},
+  sonstige: {label:"Sonstige", color:"#8494a8"}
+};
+const classOf = k => CLASSES[k] || CLASSES.sonstige;
+
+// Yahoo-Instrumententyp -> eigene Anlageklasse
+function mapType(t) {
+  t = String(t || "").toUpperCase();
+  if (t === "ETF") return "etf";
+  if (t === "MUTUALFUND") return "etf";
+  if (t === "CRYPTOCURRENCY") return "krypto";
+  if (t === "FUTURE" || t === "COMMODITY") return "rohstoff";
+  if (t === "INDEX") return "index";
+  if (t === "EQUITY") return "aktie";
+  return "sonstige";
+}
+
+const CATALOG = [
+  // ETFs
+  {s:"EUNL.DE", n:"iShares Core MSCI World",           c:"etf",      g:"ETF"},
+  {s:"VWCE.DE", n:"Vanguard FTSE All-World",           c:"etf",      g:"ETF"},
+  {s:"SXR8.DE", n:"iShares Core S&P 500",              c:"etf",      g:"ETF"},
+  {s:"IS3N.DE", n:"iShares Core MSCI EM IMI",          c:"etf",      g:"ETF"},
+  {s:"EXS1.DE", n:"iShares Core DAX",                  c:"etf",      g:"ETF"},
+  {s:"EXXT.DE", n:"iShares Nasdaq-100",                c:"etf",      g:"ETF"},
+  // Rohstoffe
+  {s:"4GLD.DE", n:"Xetra-Gold",                        c:"rohstoff", g:"Rohstoffe"},
+  {s:"GC=F",    n:"Gold (Future, Feinunze)",           c:"rohstoff", g:"Rohstoffe"},
+  {s:"SI=F",    n:"Silber (Future, Feinunze)",         c:"rohstoff", g:"Rohstoffe"},
+  {s:"CL=F",    n:"Rohöl WTI (Future)",                c:"rohstoff", g:"Rohstoffe"},
+  // Aktien Europa
+  {s:"SAP.DE",  n:"SAP SE",                            c:"aktie",    g:"Aktien Europa"},
+  {s:"SIE.DE",  n:"Siemens AG",                        c:"aktie",    g:"Aktien Europa"},
+  {s:"ALV.DE",  n:"Allianz SE",                        c:"aktie",    g:"Aktien Europa"},
+  {s:"BMW.DE",  n:"BMW AG",                            c:"aktie",    g:"Aktien Europa"},
+  {s:"AIR.DE",  n:"Airbus SE",                         c:"aktie",    g:"Aktien Europa"},
+  {s:"ASML.AS", n:"ASML Holding",                      c:"aktie",    g:"Aktien Europa"},
+  {s:"MC.PA",   n:"LVMH",                              c:"aktie",    g:"Aktien Europa"},
+  // Aktien USA
+  {s:"AAPL",    n:"Apple Inc.",                        c:"aktie",    g:"Aktien USA"},
+  {s:"MSFT",    n:"Microsoft Corp.",                   c:"aktie",    g:"Aktien USA"},
+  {s:"NVDA",    n:"NVIDIA Corp.",                      c:"aktie",    g:"Aktien USA"},
+  {s:"AMZN",    n:"Amazon.com",                        c:"aktie",    g:"Aktien USA"},
+  {s:"GOOGL",   n:"Alphabet Inc. A",                   c:"aktie",    g:"Aktien USA"},
+  {s:"TSLA",    n:"Tesla Inc.",                        c:"aktie",    g:"Aktien USA"},
+  // Krypto
+  {s:"BTC-EUR", n:"Bitcoin",                           c:"krypto",   g:"Krypto"},
+  {s:"ETH-EUR", n:"Ethereum",                          c:"krypto",   g:"Krypto"},
+  // Indizes
+  {s:"^GDAXI",  n:"DAX",                               c:"index",    g:"Indizes"},
+  {s:"^GSPC",   n:"S&P 500",                           c:"index",    g:"Indizes"},
+  {s:"^STOXX50E", n:"Euro Stoxx 50",                   c:"index",    g:"Indizes"}
+];
+const catalogBySymbol = {};
+CATALOG.forEach(a => catalogBySymbol[a.s] = a);
+
+/* ------------------------------------------------------- Persistenz */
+const KEY = "fd_state_v1";
+const PX_KEY = "fd_prices_v1";
+
+function defaultState() {
+  return {
+    version: 1,
+    transactions: [],
+    settings: {feeMode:"percent", feeValue:0.25, feeMin:1, theme:"dark"},
+    meta: {}                       // symbol -> {name, currency, cls}
+  };
+}
+let state = defaultState();
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s && Array.isArray(s.transactions)) {
+      state = Object.assign(defaultState(), s);
+      state.settings = Object.assign(defaultState().settings, s.settings || {});
+      state.meta = s.meta || {};
+    }
+  } catch (e) { console.warn("State konnte nicht gelesen werden", e); }
+}
+/* Gespeichert wird doppelt: sofort im localStorage und – sobald der lokale
+   Server läuft – zusätzlich als depot.json im Projektordner. Die Datei
+   überlebt einen geleerten Browser-Cache und einen Browserwechsel. */
+const FileStore = {
+  available: false,
+  path: "",
+  lastSaved: 0,
+  lastError: "",
+  _timer: null,
+
+  endpointMissing: false,        // Server antwortet, kennt /api/state aber nicht
+
+  async load() {
+    try {
+      const r = await fetch("/api/state", {cache:"no-store"});
+      if (!r.ok) {
+        // Server da, Endpunkt fehlt -> laeuft mit aelterem Code
+        this.available = false;
+        this.endpointMissing = true;
+        return null;
+      }
+      const j = await r.json();
+      this.available = true;
+      this.endpointMissing = false;
+      this.path = j.path || "";
+      return j.state && Array.isArray(j.state.transactions) ? j.state : null;
+    } catch (e) {
+      this.available = false;
+      this.endpointMissing = false;
+      return null;
+    }
+  },
+
+  // Mehrere Buchungen kurz hintereinander ergeben nur einen Schreibvorgang
+  queue() {
+    if (!this.available) return;
+    clearTimeout(this._timer);
+    this._timer = setTimeout(() => this.flush(), 600);
+  },
+
+  async flush() {
+    if (!this.available) return false;
+    clearTimeout(this._timer);
+    this._timer = null;               // sonst gilt dauerhaft ein Schreibvorgang als offen
+    try {
+      const r = await fetch("/api/state", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(state)
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || ("HTTP " + r.status));
+      this.lastSaved = Date.now();
+      this.lastError = "";
+      this.path = j.path || this.path;
+    } catch (e) {
+      this.lastError = e.message;
+      toast("Depotdatei konnte nicht geschrieben werden: " + e.message, "err");
+      return false;
+    }
+    updateSaveHint();
+    return true;
+  }
+};
+
+function saveState() {
+  state.updatedAt = Date.now();
+  try { localStorage.setItem(KEY, JSON.stringify(state)); }
+  catch (e) { toast("Speichern im Browser fehlgeschlagen – Speicher voll?", "err"); }
+  FileStore.queue();
+}
+
+/* Vor dem Schließen nicht auf den Sammel-Timer warten */
+window.addEventListener("beforeunload", () => {
+  if (!FileStore.available || !FileStore._timer) return;   // nur wenn wirklich etwas aussteht
+  clearTimeout(FileStore._timer);
+  FileStore._timer = null;
+  try {
+    navigator.sendBeacon("/api/state",
+      new Blob([JSON.stringify(state)], {type:"application/json"}));
+  } catch (e) { /* im Zweifel bleibt der localStorage-Stand */ }
+});
+function rememberMeta(sym, info) {
+  state.meta[sym] = {
+    name: info.name || sym,
+    currency: (info.currency || "EUR").toUpperCase(),
+    cls: info.cls || mapType(info.type)
+  };
+}
+function metaOf(sym) {
+  return state.meta[sym] || {name: (catalogBySymbol[sym] || {}).n || sym, currency:"EUR",
+                             cls: (catalogBySymbol[sym] || {}).c || "sonstige"};
+}
+
+/* ==================================================================
+   Kursdaten
+   Live: lokaler Proxy (server.py) -> Yahoo Finance + EZB-Wechselkurse
+   Demo: deterministische Kursreihen, damit die App auch offline läuft
+   ================================================================== */
+const Prices = (() => {
+  let live = false;
+  let sourceInfo = "";
+  let hasTwelveData = false;
+  const hist = {};       // symbol -> {name,currency,cls,dates:[],map:{},price,prev}
+  const fx = {};         // waehrung -> {rates:{}, latest, dates:[]}
+  const pending = {};
+
+  /* -- Demo-Kursreihen: gleicher Seed -> immer gleicher Verlauf ----- */
+  function seedOf(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function rng(seed) {
+    let a = seed;
+    return () => { a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+  const DEMO_PROFILE = {
+    aktie:    {start: 90,  drift: 0.09,  vol: 0.26},
+    etf:      {start: 70,  drift: 0.075, vol: 0.15},
+    rohstoff: {start: 130, drift: 0.06,  vol: 0.17},
+    krypto:   {start: 9000,drift: 0.28,  vol: 0.70},
+    index:    {start: 9000,drift: 0.07,  vol: 0.17},
+    sonstige: {start: 100, drift: 0.05,  vol: 0.20}
+  };
+  function demoSeries(sym, cls) {
+    const p = DEMO_PROFILE[cls] || DEMO_PROFILE.sonstige;
+    const r = rng(seedOf(sym));
+    const days = 365 * 8;
+    const dt = 1 / 252, mu = p.drift, sig = p.vol;
+    let price = p.start * (0.6 + r() * 0.9);
+    const dates = [], map = {};
+    let d = new Date(); d.setUTCHours(12, 0, 0, 0);
+    d.setUTCDate(d.getUTCDate() - days);
+    for (let i = 0; i < days; i++) {
+      const wd = d.getUTCDay();
+      if (wd !== 0 && wd !== 6) {
+        // Box-Muller fuer normalverteilte Tagesrendite
+        const u1 = Math.max(r(), 1e-9), u2 = r();
+        const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        price *= Math.exp((mu - sig * sig / 2) * dt + sig * Math.sqrt(dt) * z);
+        const key = iso(d);
+        dates.push(key); map[key] = Math.round(price * 10000) / 10000;
+      }
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return {dates, map};
+  }
+
+  /* -- Zwischenspeicher im Browser (1 Stunde) ---------------------- */
+  function cacheRead(sym) {
+    try {
+      const all = JSON.parse(localStorage.getItem(PX_KEY) || "{}");
+      const e = all[sym];
+      if (e && Date.now() - e.t < 3600e3) return e.d;
+    } catch (e) {}
+    return null;
+  }
+  function cacheWrite(sym, data) {
+    try {
+      const all = JSON.parse(localStorage.getItem(PX_KEY) || "{}");
+      all[sym] = {t: Date.now(), d: data};
+      const keys = Object.keys(all);
+      if (keys.length > 24) {                       // aeltesten Eintrag verwerfen
+        keys.sort((a, b) => all[a].t - all[b].t);
+        delete all[keys[0]];
+      }
+      localStorage.setItem(PX_KEY, JSON.stringify(all));
+    } catch (e) { try { localStorage.removeItem(PX_KEY); } catch (e2) {} }
+  }
+
+  async function detect() {
+    try {
+      const r = await fetch("/api/status", {cache:"no-store"});
+      if (r.ok) {
+        const j = await r.json();
+        live = !!j.live;
+        sourceInfo = j.source || "";
+        hasTwelveData = !!j.twelvedata;
+        return live;
+      }
+    } catch (e) {}
+    live = false;
+    return false;
+  }
+
+  async function history(sym) {
+    if (hist[sym]) return hist[sym];
+    if (pending[sym]) return pending[sym];
+
+    pending[sym] = (async () => {
+      const cached = live ? cacheRead(sym) : null;
+      let raw = cached;
+      if (!raw && live) {
+        const r = await fetch("/api/history?symbol=" + encodeURIComponent(sym) + "&range=10y&interval=1d");
+        const j = await r.json();
+        if (!r.ok || j.error) throw new Error(j.error || ("Symbol " + sym + " nicht gefunden"));
+        raw = j;
+        cacheWrite(sym, j);
+      }
+
+      let out;
+      if (raw) {
+        const dates = [], map = {};
+        raw.points.forEach(p => { dates.push(p[0]); map[p[0]] = p[1]; });
+        out = {
+          symbol: sym, name: raw.name || sym,
+          currency: (raw.currency || "EUR").toUpperCase(),
+          cls: (catalogBySymbol[sym] || {}).c || mapType(raw.type),
+          dates, map,
+          price: raw.price != null ? raw.price : (dates.length ? map[dates[dates.length - 1]] : 0),
+          prev: raw.previousClose != null ? raw.previousClose
+                : (dates.length > 1 ? map[dates[dates.length - 2]] : null)
+        };
+      } else {
+        const cat = catalogBySymbol[sym] || {n: sym, c: "sonstige"};
+        const gen = demoSeries(sym, cat.c);
+        const last = gen.dates[gen.dates.length - 1];
+        out = {
+          symbol: sym, name: cat.n, currency: "EUR", cls: cat.c,
+          dates: gen.dates, map: gen.map,
+          price: gen.map[last],
+          prev: gen.map[gen.dates[gen.dates.length - 2]]
+        };
+      }
+      rememberMeta(sym, out);
+      hist[sym] = out;
+      delete pending[sym];
+      return out;
+    })();
+
+    try { return await pending[sym]; }
+    catch (e) { delete pending[sym]; throw e; }
+  }
+
+  async function fxSeries(cur, since) {
+    cur = (cur || "EUR").toUpperCase();
+    if (cur === "EUR") return {rates:{}, latest:1, dates:[]};
+    if (fx[cur]) return fx[cur];
+    if (!live) { fx[cur] = {rates:{}, latest:0.92, dates:[]}; return fx[cur]; }
+    try {
+      const r = await fetch("/api/fx?base=" + encodeURIComponent(cur) + "&start=" + (since || "2015-01-01"));
+      const j = await r.json();
+      const dates = Object.keys(j.rates || {}).sort();
+      fx[cur] = {rates: j.rates || {}, latest: j.latest || 1, dates};
+    } catch (e) {
+      fx[cur] = {rates:{}, latest:1, dates:[]};
+    }
+    return fx[cur];
+  }
+
+  // letzter bekannter Wert <= date (Vorwärtsfüllung)
+  function lookup(dates, map, date) {
+    if (!dates.length) return null;
+    if (map[date] != null) return map[date];
+    if (date < dates[0]) return null;
+    let lo = 0, hi = dates.length - 1, best = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (dates[mid] <= date) { best = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return best >= 0 ? map[dates[best]] : null;
+  }
+
+  function priceAt(sym, date) {
+    const h = hist[sym];
+    if (!h) return null;
+    const v = lookup(h.dates, h.map, date);
+    return v != null ? v : h.map[h.dates[0]];   // vor Kursbeginn: erster bekannter Kurs
+  }
+  function fxAt(cur, date) {
+    cur = (cur || "EUR").toUpperCase();
+    if (cur === "EUR") return 1;
+    const f = fx[cur];
+    if (!f) return 1;
+    const v = lookup(f.dates, f.rates, date);
+    return v != null ? v : (f.latest || 1);
+  }
+  function fxNow(cur) {
+    cur = (cur || "EUR").toUpperCase();
+    return cur === "EUR" ? 1 : ((fx[cur] || {}).latest || 1);
+  }
+
+  async function search(q) {
+    const needle = q.trim().toLowerCase();
+    const local = CATALOG
+      .filter(a => a.s.toLowerCase().includes(needle) || a.n.toLowerCase().includes(needle))
+      .map(a => ({symbol:a.s, name:a.n, cls:a.c, exchange:"Katalog"}));
+    if (!live) return local.slice(0, 12);
+    try {
+      const r = await fetch("/api/search?q=" + encodeURIComponent(q));
+      const j = await r.json();
+      const remote = (j.results || []).map(x => ({
+        symbol:x.symbol, name:x.name, cls:(catalogBySymbol[x.symbol] || {}).c || mapType(x.type),
+        exchange:x.exchange
+      }));
+      const seen = {}, out = [];
+      local.concat(remote).forEach(x => { if (!seen[x.symbol]) { seen[x.symbol] = 1; out.push(x); } });
+      return out.slice(0, 14);
+    } catch (e) { return local.slice(0, 12); }
+  }
+
+  return {
+    detect, history, fxSeries, priceAt, fxAt, fxNow, search,
+    get live() { return live; },
+    get sourceInfo() { return sourceInfo; },
+    get hasTwelveData() { return hasTwelveData; },
+    get loaded() { return hist; },
+    meta: sym => hist[sym] || null,
+    clearCache: () => { try { localStorage.removeItem(PX_KEY); } catch (e) {} }
+  };
+})();
+
+/* ==================================================================
+   Depotlogik – alles wird aus dem Journal nachgespielt
+   Kostenbasis: gleitender Durchschnittspreis inkl. Kaufgebühren
+   ================================================================== */
+function sortedTx() {
+  return state.transactions.slice().sort((a, b) =>
+    a.date === b.date ? (a.seq || 0) - (b.seq || 0) : (a.date < b.date ? -1 : 1));
+}
+
+function replay(upToDate) {
+  const pos = {};      // symbol -> {qty, cost, realized, currency, name, cls}
+  let cash = 0, deposits = 0, withdrawals = 0, fees = 0, realized = 0;
+
+  for (const t of sortedTx()) {
+    if (upToDate && t.date > upToDate) break;
+    if (t.type === "deposit")      { cash += t.amount; deposits += t.amount; }
+    else if (t.type === "withdraw"){ cash -= t.amount; withdrawals += t.amount; }
+    else if (t.type === "buy" || t.type === "sell") {
+      const m = metaOf(t.symbol);
+      const p = pos[t.symbol] || (pos[t.symbol] = {
+        qty:0, cost:0, realized:0, currency:t.currency || m.currency,
+        name:t.name || m.name, cls:t.cls || m.cls
+      });
+      const gross = t.qty * t.price * (t.fx || 1);
+      const fee = t.fee || 0;
+      fees += fee;
+      if (t.type === "buy") {
+        cash -= (gross + fee);
+        p.qty += t.qty;
+        p.cost += gross + fee;
+      } else {
+        const avg = p.qty > 0 ? p.cost / p.qty : 0;
+        const soldCost = avg * t.qty;
+        const proceeds = gross - fee;
+        cash += proceeds;
+        p.qty -= t.qty;
+        p.cost -= soldCost;
+        p.realized += proceeds - soldCost;
+        realized += proceeds - soldCost;
+        if (p.qty < 1e-9) { p.qty = 0; p.cost = 0; }
+      }
+    }
+  }
+  return {cash, positions:pos, deposits, withdrawals, fees, realized};
+}
+
+/** Aktueller Depotstand mit Marktbewertung von heute. */
+function snapshot() {
+  const s = replay();
+  const rows = [];
+  let market = 0, invested = 0;
+
+  Object.keys(s.positions).forEach(sym => {
+    const p = s.positions[sym];
+    if (p.qty <= 1e-9) return;
+    const h = Prices.meta(sym);
+    const cur = h ? h.currency : p.currency;
+    const priceLocal = h ? h.price : null;
+    const rate = Prices.fxNow(cur);
+    const value = priceLocal != null ? p.qty * priceLocal * rate : p.cost;
+    const prevLocal = h && h.prev != null ? h.prev : priceLocal;
+    const dayAbs = priceLocal != null ? p.qty * (priceLocal - prevLocal) * rate : 0;
+    const dayPct = prevLocal ? (priceLocal / prevLocal - 1) * 100 : 0;
+
+    market += value; invested += p.cost;
+    rows.push({
+      symbol: sym, name: (h ? h.name : p.name), cls: (h ? h.cls : p.cls) || "sonstige",
+      currency: cur, qty: p.qty, cost: p.cost,
+      avg: p.qty ? p.cost / p.qty : 0,
+      priceLocal, priceEur: priceLocal != null ? priceLocal * rate : null,
+      value, pnl: value - p.cost, pnlPct: p.cost ? (value / p.cost - 1) * 100 : 0,
+      dayAbs, dayPct, realized: p.realized, priced: priceLocal != null
+    });
+  });
+
+  rows.sort((a, b) => b.value - a.value);
+  const total = market + s.cash;
+  const net = s.deposits - s.withdrawals;
+  return {
+    rows, cash: s.cash, market, invested, total,
+    deposits: s.deposits, withdrawals: s.withdrawals, net,
+    fees: s.fees, realized: s.realized,
+    unrealized: market - invested,
+    totalPnl: total - net,
+    totalPnlPct: net > 0 ? ((total / net) - 1) * 100 : 0,
+    dayAbs: rows.reduce((a, r) => a + r.dayAbs, 0)
+  };
+}
+
+/** Tagesreihe von Gesamtwert und Nettoeinzahlung ab der ersten Buchung. */
+function valueSeries() {
+  const tx = sortedTx();
+  if (!tx.length) return {dates:[], total:[], net:[]};
+
+  const start = tx[0].date;
+  const end = today();
+  const dates = [], totals = [], nets = [];
+  const hold = {};
+  let cash = 0, net = 0, ti = 0;
+
+  let d = start;
+  let guard = 0;
+  while (d <= end && guard++ < 20000) {
+    while (ti < tx.length && tx[ti].date <= d) {
+      const t = tx[ti++];
+      if (t.type === "deposit")       { cash += t.amount; net += t.amount; }
+      else if (t.type === "withdraw") { cash -= t.amount; net -= t.amount; }
+      else if (t.type === "buy")      { cash -= (t.qty * t.price * (t.fx || 1) + (t.fee || 0));
+                                        hold[t.symbol] = (hold[t.symbol] || 0) + t.qty; }
+      else if (t.type === "sell")     { cash += (t.qty * t.price * (t.fx || 1) - (t.fee || 0));
+                                        hold[t.symbol] = (hold[t.symbol] || 0) - t.qty; }
+    }
+    let mv = 0;
+    for (const sym in hold) {
+      const q = hold[sym];
+      if (q <= 1e-9) continue;
+      const px = Prices.priceAt(sym, d);
+      if (px == null) continue;
+      mv += q * px * Prices.fxAt(metaOf(sym).currency, d);
+    }
+    dates.push(d); totals.push(cash + mv); nets.push(net);
+    d = addDays(d, 1);
+  }
+  return {dates, total: totals, net: nets};
+}
+
+/* ==================================================================
+   Diagramme (handgezeichnetes SVG, keine externen Bibliotheken)
+   ================================================================== */
+function lineChart(container, dates, series, opts) {
+  opts = opts || {};
+  const W = Math.max(container.clientWidth || 640, 320);
+  const H = opts.height || 300;
+  const padL = 62, padR = 14, padT = 12, padB = 26;
+  const iw = W - padL - padR, ih = H - padT - padB;
+
+  if (!dates.length) {
+    container.innerHTML = '<div class="empty">' + (opts.emptyText || "Noch keine Daten") + "</div>";
+    return;
+  }
+
+  let min = Infinity, max = -Infinity;
+  series.forEach(s => s.values.forEach(v => { if (v == null || !isFinite(v)) return;
+    if (v < min) min = v; if (v > max) max = v; }));
+  if (!isFinite(min)) { min = 0; max = 1; }
+  if (min === max) { min -= 1; max += 1; }
+  const span = max - min;
+  min -= span * 0.08; max += span * 0.08;
+  if (opts.zeroBase && min > 0) min = 0;
+
+  const X = i => padL + (dates.length === 1 ? iw / 2 : (i / (dates.length - 1)) * iw);
+  const Y = v => padT + ih - ((v - min) / (max - min)) * ih;
+
+  // Rasterlinien
+  const ticks = 5, grid = [];
+  for (let i = 0; i <= ticks; i++) {
+    const v = min + (max - min) * (i / ticks), y = Y(v);
+    grid.push('<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) +
+              '" y2="' + y.toFixed(1) + '" stroke="' + col("var(--line)") + '" stroke-width="1"/>');
+    grid.push('<text x="' + (padL - 9) + '" y="' + (y + 4).toFixed(1) +
+              '" text-anchor="end" font-size="10.5" fill="' + col("var(--fg-3)") + '">' +
+              esc(opts.fmtY ? opts.fmtY(v) : eur0(v)) + "</text>");
+  }
+
+  // X-Beschriftung
+  const labels = [];
+  const stepsX = Math.min(6, dates.length);
+  for (let i = 0; i < stepsX; i++) {
+    const idx = Math.round(i * (dates.length - 1) / Math.max(stepsX - 1, 1));
+    const dt = dates[idx].split("-");
+    labels.push('<text x="' + X(idx).toFixed(1) + '" y="' + (H - 6) +
+                '" text-anchor="middle" font-size="10.5" fill="' + col("var(--fg-3)") + '">' +
+                dt[2] + "." + dt[1] + "." + dt[0].slice(2) + "</text>");
+  }
+
+  series.forEach(s => { s.color = col(s.color); });
+
+  const paths = series.map((s, si) => {
+    let d = "", started = false;
+    s.values.forEach((v, i) => {
+      if (v == null || !isFinite(v)) return;
+      d += (started ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1) + " ";
+      started = true;
+    });
+    if (!d) return "";
+    let out = "";
+    if (s.fill) {
+      const first = s.values.findIndex(v => v != null && isFinite(v));
+      const lastIdx = s.values.length - 1;
+      out += '<path d="' + d + "L" + X(lastIdx).toFixed(1) + " " + (padT + ih) +
+             " L" + X(first).toFixed(1) + " " + (padT + ih) + ' Z" fill="url(#grad' + si + ')" opacity=".5"/>';
+    }
+    out += '<path d="' + d + '" fill="none" stroke="' + s.color + '" stroke-width="' +
+           (s.width || 2) + '" stroke-dasharray="' + (s.dash || "") +
+           '" stroke-linejoin="round" stroke-linecap="round"/>';
+    return out;
+  }).join("");
+
+  const defs = series.map((s, si) =>
+    '<linearGradient id="grad' + si + '" x1="0" y1="0" x2="0" y2="1">' +
+    '<stop offset="0%" stop-color="' + s.color + '" stop-opacity=".30"/>' +
+    '<stop offset="100%" stop-color="' + s.color + '" stop-opacity="0"/></linearGradient>').join("");
+
+  container.innerHTML =
+    '<svg viewBox="0 0 ' + W + " " + H + '" height="' + H + '" preserveAspectRatio="none">' +
+    "<defs>" + defs + "</defs>" + grid.join("") + labels.join("") + paths +
+    '<line id="cross" x1="0" y1="' + padT + '" x2="0" y2="' + (padT + ih) +
+    '" stroke="' + col("var(--fg-3)") + '" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>' +
+    series.map(s => '<circle class="mk" r="4" fill="' + s.color +
+      '" stroke="' + col("var(--card)") + '" stroke-width="2" opacity="0"/>').join("") +
+    "</svg><div class='tip'></div>";
+
+  // Hover-Auswertung
+  const svg = container.querySelector("svg");
+  const tip = container.querySelector(".tip");
+  const cross = svg.querySelector("#cross");
+  const marks = $$(".mk", svg);
+
+  function move(ev) {
+    const box = svg.getBoundingClientRect();
+    const px = ((ev.touches ? ev.touches[0].clientX : ev.clientX) - box.left) / box.width * W;
+    let i = Math.round((px - padL) / iw * (dates.length - 1));
+    i = Math.max(0, Math.min(dates.length - 1, i));
+    const xr = X(i);
+    cross.setAttribute("x1", xr); cross.setAttribute("x2", xr); cross.setAttribute("opacity", ".8");
+
+    let rows = "";
+    series.forEach((s, si) => {
+      const v = s.values[i];
+      if (v == null || !isFinite(v)) { marks[si].setAttribute("opacity", 0); return; }
+      marks[si].setAttribute("cx", xr); marks[si].setAttribute("cy", Y(v));
+      marks[si].setAttribute("opacity", 1);
+      rows += '<div class="r"><span style="color:var(--fg-2)">' + esc(s.name) + '</span><b style="color:' +
+              s.color + ';font-size:12.5px;display:inline">' +
+              esc(opts.fmtTip ? opts.fmtTip(v) : eur(v)) + "</b></div>";
+    });
+    tip.innerHTML = "<b>" + deDate(dates[i]) + "</b>" + rows;
+    tip.style.opacity = 1;
+    const relX = xr / W * box.width;
+    tip.style.left = Math.min(Math.max(relX + 14, 4), box.width - tip.offsetWidth - 4) + "px";
+    tip.style.top = "8px";
+  }
+  function leave() {
+    tip.style.opacity = 0; cross.setAttribute("opacity", 0);
+    marks.forEach(m => m.setAttribute("opacity", 0));
+  }
+  svg.addEventListener("mousemove", move);
+  svg.addEventListener("mouseleave", leave);
+  svg.addEventListener("touchmove", move, {passive:true});
+  svg.addEventListener("touchend", leave);
+}
+
+function donut(el, slices, centerTop, centerSub) {
+  const size = 168, r = 68, sw = 22, cx = size / 2, cy = size / 2;
+  const total = slices.reduce((a, s) => a + s.value, 0);
+  if (!total) { el.innerHTML = '<div class="empty" style="padding:20px">–</div>'; return; }
+  let angle = -Math.PI / 2, out = "";
+  slices.forEach(s => {
+    s.color = col(s.color);
+    const frac = s.value / total;
+    const sweep = frac * Math.PI * 2;
+    const end = angle + sweep;
+    if (frac > 0.9999) {
+      out += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' +
+             s.color + '" stroke-width="' + sw + '"/>';
+    } else {
+      const x1 = cx + r * Math.cos(angle), y1 = cy + r * Math.sin(angle);
+      const x2 = cx + r * Math.cos(end),   y2 = cy + r * Math.sin(end);
+      out += '<path d="M' + x1.toFixed(2) + " " + y1.toFixed(2) + " A" + r + " " + r + " 0 " +
+             (sweep > Math.PI ? 1 : 0) + " 1 " + x2.toFixed(2) + " " + y2.toFixed(2) +
+             '" fill="none" stroke="' + s.color + '" stroke-width="' + sw + '" stroke-linecap="butt"/>';
+    }
+    angle = end;
+  });
+  el.innerHTML = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + " " + size + '">' + out +
+    '<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" font-size="17" font-weight="650" fill="' +
+    col("var(--fg)") + '">' + esc(centerTop) + '</text><text x="' + cx + '" y="' + (cy + 16) +
+    '" text-anchor="middle" font-size="11" fill="' + col("var(--fg-3)") + '">' + esc(centerSub) + "</text></svg>";
+}
+
+function sparkline(sym, days) {
+  const h = Prices.meta(sym);
+  if (!h || h.dates.length < 3) return "";
+  const pts = h.dates.slice(-(days || 90)).map(d => h.map[d]);
+  const w = 78, ht = 24;
+  const mn = Math.min.apply(null, pts), mx = Math.max.apply(null, pts);
+  const rng2 = (mx - mn) || 1;
+  const d = pts.map((v, i) =>
+    (i ? "L" : "M") + (i / (pts.length - 1) * w).toFixed(1) + " " +
+    (ht - (v - mn) / rng2 * ht).toFixed(1)).join(" ");
+  const color = col(pts[pts.length - 1] >= pts[0] ? "var(--up)" : "var(--down)");
+  return '<svg class="spark" width="' + w + '" height="' + ht + '" viewBox="0 0 ' + w + " " + ht +
+         '"><path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="1.6"/></svg>';
+}
+
+/* ==================================================================
+   Rendern
+   ================================================================== */
+let currentRange = "MAX";
+
+function kpiCard(label, value, sub, subCls, hero) {
+  return '<div class="kpi' + (hero ? " hero" : "") + '"><div class="label">' + esc(label) + "</div>" +
+         '<div class="value mono">' + value + "</div>" +
+         '<div class="delta ' + (subCls || "") + '">' + (sub || "&nbsp;") + "</div></div>";
+}
+
+function renderOverview() {
+  const s = snapshot();
+  $("#kpis").innerHTML =
+    kpiCard("Gesamtwert", eur(s.total),
+      s.rows.length ? (s.dayAbs >= 0 ? "▲ " : "▼ ") + signed(s.dayAbs) + " heute" : "noch keine Anlagen",
+      cls(s.dayAbs), true) +
+    kpiCard("Gewinn / Verlust", signed(s.totalPnl),
+      s.net > 0 ? pct(s.totalPnlPct) + " auf eingezahltes Kapital" : "keine Einzahlung", cls(s.totalPnl)) +
+    kpiCard("Depotwert", eur(s.market),
+      s.rows.length + " Position" + (s.rows.length === 1 ? "" : "en")) +
+    kpiCard("Barmittel", eur(s.cash),
+      "netto eingezahlt " + eur(s.net), s.cash < 0 ? "down" : "") +
+    kpiCard("Realisiert", signed(s.realized),
+      "Gebühren gesamt " + eur(s.fees), cls(s.realized));
+
+  const vs = valueSeries();
+  let dates = vs.dates, tot = vs.total, net = vs.net;
+  if (currentRange !== "MAX" && dates.length) {
+    const back = {"1M":30, "6M":182, "1J":365, "3J":1095}[currentRange] || 99999;
+    const cut = addDays(today(), -back);
+    let i = dates.findIndex(d => d >= cut);
+    if (i < 0) i = Math.max(dates.length - 2, 0);
+    dates = dates.slice(i); tot = tot.slice(i); net = net.slice(i);
+  }
+  lineChart($("#mainChart"), dates, [
+    {name:"Gesamtwert", color:"var(--accent)", values:tot, fill:true, width:2.2},
+    {name:"Netto eingezahlt", color:"var(--fg-3)", values:net, width:1.5, dash:"5 4"}
+  ], {height:300, emptyText:"Noch keine Buchungen.<br>Zahle unter „Kasse“ Geld ein und kaufe unter „Handeln“ dein erstes Wertpapier."});
+
+  // Aufteilung nach Anlageklasse (Barmittel als eigene Scheibe)
+  const byClass = {};
+  s.rows.forEach(r => byClass[r.cls] = (byClass[r.cls] || 0) + r.value);
+  const classSlices = Object.keys(byClass)
+    .map(k => ({name:classOf(k).label, value:byClass[k], color:classOf(k).color}))
+    .sort((a, b) => b.value - a.value);
+  if (s.cash > 0.005) classSlices.push({name:"Barmittel", value:s.cash, color:"var(--fg-3)"});
+
+  donut($("#donutClass"), classSlices, eur0(s.total), "Gesamt");
+  $("#listClass").innerHTML = classSlices.length
+    ? classSlices.map(sl => allocRow(sl, s.total)).join("")
+    : '<div class="hint">Noch nichts angelegt.</div>';
+
+  const posSlices = s.rows.slice(0, 6).map((r, i) => ({
+    name: r.name, value: r.value,
+    color: ["#4f8cff", "#2ecc8f", "#e0a83c", "#a778f0", "#43c9d8", "#f08fb0"][i]
+  }));
+  const rest = s.rows.slice(6).reduce((a, r) => a + r.value, 0);
+  if (rest > 0.005) posSlices.push({name:"Übrige", value:rest, color:"var(--fg-3)"});
+  donut($("#donutPos"), posSlices, eur0(s.market), "Depot");
+  $("#listPos").innerHTML = posSlices.length
+    ? posSlices.map(sl => allocRow(sl, s.market)).join("")
+    : '<div class="hint">Noch keine Positionen.</div>';
+
+  // G/V-Balken
+  if (!s.rows.length) {
+    $("#pnlBars").innerHTML = '<div class="empty">Noch keine Positionen.</div>';
+  } else {
+    const maxAbs = Math.max.apply(null, s.rows.map(r => Math.abs(r.pnl))) || 1;
+    $("#pnlBars").innerHTML = s.rows.map(r => {
+      const w = Math.abs(r.pnl) / maxAbs * 50;
+      const pos = r.pnl >= 0;
+      return '<div style="display:flex;align-items:center;gap:12px;padding:7px 0">' +
+        '<div style="width:150px;min-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px">' +
+          '<span class="sym">' + esc(r.symbol) + "</span></div>" +
+        '<div style="flex:1;position:relative;height:16px;background:var(--bg-2);border-radius:5px;min-width:80px">' +
+          '<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line-2)"></div>' +
+          '<div style="position:absolute;top:2px;bottom:2px;border-radius:3px;background:' +
+            (pos ? "var(--up)" : "var(--down)") + ";" +
+            (pos ? "left:50%;width:" + w + "%" : "right:50%;width:" + w + "%") + '"></div>' +
+        "</div>" +
+        '<div class="mono ' + cls(r.pnl) + '" style="width:118px;text-align:right;font-size:13px">' +
+          signed(r.pnl) + "</div>" +
+        '<div class="mono ' + cls(r.pnl) + '" style="width:74px;text-align:right;font-size:12.5px">' +
+          pct(r.pnlPct) + "</div></div>";
+    }).join("");
+  }
+}
+
+function allocRow(sl, total) {
+  const p = total ? sl.value / total * 100 : 0;
+  return '<div class="alloc-row"><span class="swatch" style="background:' + sl.color + '"></span>' +
+    '<span class="n">' + esc(sl.name) + '</span>' +
+    '<span class="mono">' + eur0(sl.value) + '</span>' +
+    '<span class="p mono">' + num(p, 1) + " %</span></div>";
+}
+
+function renderDepot() {
+  const s = snapshot();
+  $("#depotKpis").innerHTML =
+    kpiCard("Depotwert", eur(s.market), (s.dayAbs >= 0 ? "▲ " : "▼ ") + signed(s.dayAbs) + " heute", cls(s.dayAbs), true) +
+    kpiCard("Investiert", eur(s.invested), "Anschaffungskosten inkl. Gebühren") +
+    kpiCard("Nicht realisiert", signed(s.unrealized),
+      s.invested ? pct(s.invested ? (s.market / s.invested - 1) * 100 : 0) : "", cls(s.unrealized)) +
+    kpiCard("Barmittel", eur(s.cash), "frei verfügbar");
+
+  const t = $("#posTable");
+  if (!s.rows.length) {
+    t.innerHTML = '<tbody><tr><td><div class="empty">Noch keine Positionen im Depot.<br>' +
+      'Unter „Handeln“ kannst du dein erstes Wertpapier kaufen.</div></td></tr></tbody>';
+    return;
+  }
+  t.innerHTML =
+    "<thead><tr><th class='l'>Wertpapier</th><th>Anz.</th><th>Ø Kauf</th><th>Kurs</th>" +
+    "<th>Tag</th><th>Wert</th><th>G/V</th><th>G/V %</th><th>Anteil</th><th></th></tr></thead><tbody>" +
+    s.rows.map(r => {
+      const share = s.market ? r.value / s.market * 100 : 0;
+      return "<tr><td class='l'><div class='sym'>" + esc(r.symbol) +
+        ' <span class="pill" style="margin-left:4px"><span class="swatch" style="background:' +
+        classOf(r.cls).color + '"></span>' + classOf(r.cls).label + "</span></div>" +
+        "<div class='nm'>" + esc(r.name) + "</div></td>" +
+        "<td class='mono'>" + num(r.qty, r.qty < 1 ? 6 : 4) + "</td>" +
+        "<td class='mono'>" + eur(r.avg) + "</td>" +
+        "<td class='mono'>" + (r.priced ? eur(r.priceEur) +
+          (r.currency !== "EUR" ? '<div class="tiny muted">' + num(r.priceLocal, 2) + " " + esc(r.currency) + "</div>" : "")
+          : '<span class="muted">–</span>') + "</td>" +
+        "<td class='mono " + cls(r.dayPct) + "'>" + pct(r.dayPct) + "</td>" +
+        "<td class='mono'><b>" + eur(r.value) + "</b></td>" +
+        "<td class='mono " + cls(r.pnl) + "'>" + signed(r.pnl) + "</td>" +
+        "<td class='mono " + cls(r.pnl) + "'>" + pct(r.pnlPct) + "</td>" +
+        "<td class='mono muted'>" + num(share, 1) + " %</td>" +
+        '<td><div class="btn-row" style="justify-content:flex-end;flex-wrap:nowrap">' +
+          '<button class="btn sm" data-buy="' + esc(r.symbol) + '">Kaufen</button>' +
+          '<button class="btn sm" data-sell="' + esc(r.symbol) + '">Verkaufen</button></div></td></tr>';
+    }).join("") + "</tbody>";
+}
+
+function renderCash() {
+  const tx = sortedTx().filter(t => t.type === "deposit" || t.type === "withdraw").reverse();
+  const s = snapshot();
+  $("#cHint").textContent = "Barmittel: " + eur(s.cash);
+  const t = $("#cashTable");
+  if (!tx.length) { t.innerHTML = '<tbody><tr><td><div class="empty">Noch keine Ein- oder Auszahlung.</div></td></tr></tbody>'; return; }
+  t.innerHTML = "<thead><tr><th class='l'>Datum</th><th class='l'>Art</th><th>Betrag</th><th class='l'>Notiz</th><th></th></tr></thead><tbody>" +
+    tx.map(x => "<tr><td class='l mono'>" + deDate(x.date) + "</td>" +
+      "<td class='l'>" + (x.type === "deposit" ? "Einzahlung" : "Auszahlung") + "</td>" +
+      "<td class='mono " + (x.type === "deposit" ? "up" : "down") + "'>" +
+        (x.type === "deposit" ? "+" : "−") + eur(x.amount).replace("-", "") + "</td>" +
+      "<td class='l nm'>" + esc(x.note || "") + "</td>" +
+      '<td style="text-align:right"><button class="btn sm danger" data-del="' + x.id + '">Löschen</button></td></tr>').join("") +
+    "</tbody>";
+}
+
+function renderLedger() {
+  const f = $("#ledgerFilter").value;
+  let tx = sortedTx().reverse();
+  if (f === "buy") tx = tx.filter(t => t.type === "buy");
+  else if (f === "sell") tx = tx.filter(t => t.type === "sell");
+  else if (f === "cash") tx = tx.filter(t => t.type === "deposit" || t.type === "withdraw");
+
+  const t = $("#ledgerTable");
+  if (!tx.length) { t.innerHTML = '<tbody><tr><td><div class="empty">Keine Buchungen.</div></td></tr></tbody>'; return; }
+  const TYPE = {deposit:"Einzahlung", withdraw:"Auszahlung", buy:"Kauf", sell:"Verkauf"};
+  t.innerHTML = "<thead><tr><th class='l'>Datum</th><th class='l'>Art</th><th class='l'>Wertpapier</th>" +
+    "<th>Anzahl</th><th>Kurs</th><th>Gebühr</th><th>Betrag</th><th class='l'>Notiz</th><th></th></tr></thead><tbody>" +
+    tx.map(x => {
+      const isTrade = x.type === "buy" || x.type === "sell";
+      const gross = isTrade ? x.qty * x.price * (x.fx || 1) : x.amount;
+      const total = isTrade ? (x.type === "buy" ? gross + (x.fee || 0) : gross - (x.fee || 0)) : x.amount;
+      const inflow = x.type === "deposit" || x.type === "sell";
+      return "<tr><td class='l mono'>" + deDate(x.date) + "</td>" +
+        "<td class='l'>" + TYPE[x.type] + "</td>" +
+        "<td class='l'>" + (isTrade ? "<span class='sym'>" + esc(x.symbol) + "</span><div class='nm'>" +
+            esc(x.name || "") + "</div>" : "<span class='muted'>–</span>") + "</td>" +
+        "<td class='mono'>" + (isTrade ? num(x.qty, x.qty < 1 ? 6 : 4) : "") + "</td>" +
+        "<td class='mono'>" + (isTrade ? num(x.price, 4) + " " + esc(x.currency || "EUR") : "") + "</td>" +
+        "<td class='mono'>" + (isTrade ? eur(x.fee || 0) : "") + "</td>" +
+        "<td class='mono " + (inflow ? "up" : "down") + "'>" + (inflow ? "+" : "−") +
+          eur(total).replace("-", "") + "</td>" +
+        "<td class='l nm'>" + esc(x.note || "") + "</td>" +
+        '<td style="text-align:right"><button class="btn sm danger" data-del="' + x.id + '">Löschen</button></td></tr>';
+    }).join("") + "</tbody>";
+}
+
+/* ------------------------------------------------------ Marktansicht */
+let marketGroup = "Alle";
+async function renderMarkets() {
+  const groups = ["Alle"].concat(CATALOG.map(a => a.g).filter((v, i, a2) => a2.indexOf(v) === i));
+  $("#marketSeg").innerHTML = groups.map(g =>
+    '<button data-group="' + esc(g) + '"' + (g === marketGroup ? ' class="active"' : "") + ">" + esc(g) + "</button>").join("");
+
+  const list = CATALOG.filter(a => marketGroup === "Alle" || a.g === marketGroup);
+  const t = $("#marketTable");
+  t.innerHTML = "<thead><tr><th class='l'>Wertpapier</th><th class='l'>Klasse</th><th>Kurs</th><th>1 Tag</th>" +
+    "<th>1 Monat</th><th>1 Jahr</th><th class='l'>Verlauf</th><th></th></tr></thead><tbody>" +
+    list.map(a => "<tr data-row='" + esc(a.s) + "'><td class='l'><div class='sym'>" + esc(a.s) + "</div>" +
+      "<div class='nm'>" + esc(a.n) + "</div></td>" +
+      "<td class='l'><span class='pill'><span class='swatch' style='background:" + classOf(a.c).color +
+        "'></span>" + classOf(a.c).label + "</span></td>" +
+      "<td class='mono px'>…</td><td class='mono d1'>–</td><td class='mono d30'>–</td><td class='mono d365'>–</td>" +
+      "<td class='l sp'></td>" +
+      '<td style="text-align:right"><button class="btn sm" data-buy="' + esc(a.s) + '">Kaufen</button></td></tr>').join("") +
+    "</tbody>";
+
+  for (const a of list) {
+    try { await Prices.history(a.s); } catch (e) { continue; }
+    const h = Prices.meta(a.s);
+    if (!h) continue;
+    await Prices.fxSeries(h.currency, addDays(today(), -400));
+    const row = t.querySelector("tr[data-row='" + a.s.replace(/'/g, "\\'") + "']");
+    if (!row) continue;
+    const rate = Prices.fxNow(h.currency);
+    const chg = (backDays) => {
+      const then = Prices.priceAt(a.s, addDays(today(), -backDays));
+      return then ? (h.price / then - 1) * 100 : null;
+    };
+    const d1 = h.prev ? (h.price / h.prev - 1) * 100 : null;
+    const setCell = (sel, v) => {
+      const c = row.querySelector(sel);
+      c.className = "mono " + sel.slice(1) + " " + (v == null ? "muted" : cls(v));
+      c.textContent = v == null ? "–" : pct(v);
+    };
+    row.querySelector(".px").innerHTML = eur(h.price * rate) +
+      (h.currency !== "EUR" ? '<div class="tiny muted">' + num(h.price, 2) + " " + esc(h.currency) + "</div>" : "");
+    setCell(".d1", d1); setCell(".d30", chg(30)); setCell(".d365", chg(365));
+    row.querySelector(".sp").innerHTML = sparkline(a.s, 180);
+  }
+}
+
+/* ==================================================================
+   Ordermaske
+   ================================================================== */
+let sel = null;             // {symbol, name, currency, cls}
+let side = "buy", inputMode = "amount", assetRange = "1J";
+
+function feeFor(volume) {
+  const st = state.settings;
+  if (st.feeMode === "none") return 0;
+  if (st.feeMode === "fixed") return Math.max(0, +st.feeValue || 0);
+  const f = volume * (+st.feeValue || 0) / 100;
+  return Math.max(f, +st.feeMin || 0);
+}
+
+async function selectAsset(symbol) {
+  $("#symResults").classList.remove("open");
+  $("#symSearch").value = "";
+  $("#tEmptyHint").style.display = "none";
+  $("#selBox").style.display = "";
+  $("#selSym").textContent = symbol;
+  $("#selName").textContent = "lade Kursdaten …";
+  $("#selPrice").textContent = "…";
+  $("#assetChart").innerHTML = '<div class="empty">lade …</div>';
+
+  let h;
+  try { h = await Prices.history(symbol); }
+  catch (e) {
+    toast("Keine Kursdaten für " + symbol + ": " + e.message, "err");
+    $("#selBox").style.display = "none";
+    $("#tEmptyHint").style.display = "";
+    return;
+  }
+  await Prices.fxSeries(h.currency, h.dates[0] || "2015-01-01");
+
+  sel = {symbol: symbol, name: h.name, currency: h.currency, cls: h.cls};
+  const rate = Prices.fxNow(h.currency);
+  const chgPct = h.prev ? (h.price / h.prev - 1) * 100 : 0;
+
+  $("#selName").textContent = h.name;
+  $("#selPrice").textContent = eur(h.price * rate);
+  $("#selChange").innerHTML = '<span class="' + cls(chgPct) + '">' + pct(chgPct) + "</span> heute" +
+    (h.currency !== "EUR" ? ' <span class="muted">· ' + num(h.price, 2) + " " + esc(h.currency) + "</span>" : "");
+  $("#selClass").innerHTML = '<span class="swatch" style="background:' + classOf(h.cls).color + '"></span>' +
+    classOf(h.cls).label;
+  $("#selCur").textContent = "Handelswährung " + h.currency;
+
+  if (!$("#tDate").value) $("#tDate").value = today();
+  syncPriceForDate();
+  renderAssetChart();
+  updatePreview();
+  renderTradeKpis();
+}
+
+function syncPriceForDate() {
+  if (!sel) return;
+  const d = $("#tDate").value || today();
+  const p = Prices.priceAt(sel.symbol, d);
+  if (p != null) $("#tPrice").value = Math.round(p * 10000) / 10000;
+  updatePreview();
+}
+
+function renderAssetChart() {
+  if (!sel) return;
+  const h = Prices.meta(sel.symbol);
+  if (!h) return;
+  const back = {"6M":182, "1J":365, "5J":1826, "MAX":99999}[assetRange];
+  const cut = addDays(today(), -back);
+  const dates = h.dates.filter(d => d >= cut);
+  const rate = Prices.fxNow(h.currency);
+  lineChart($("#assetChart"), dates, [{
+    name: h.name.slice(0, 26), color: "var(--accent)", fill: true,
+    values: dates.map(d => h.map[d] * rate)
+  }], {height:230, fmtY: v => eur0(v), fmtTip: v => eur(v)});
+}
+
+function currentOrder() {
+  if (!sel) return null;
+  const date = $("#tDate").value || today();
+  const price = parseFloat($("#tPrice").value);
+  if (!(price > 0)) return {error:"Bitte einen gültigen Kurs eingeben."};
+  const fxRate = Prices.fxAt(sel.currency, date);
+  const unitEur = price * fxRate;
+
+  let qty;
+  if (inputMode === "qty") {
+    qty = parseFloat($("#tQty").value);
+    if (!(qty > 0)) return {error:"Bitte eine Stückzahl eingeben."};
+  } else {
+    const amount = parseFloat($("#tAmount").value);
+    if (!(amount > 0)) return {error:"Bitte einen Betrag eingeben."};
+    // Betrag inkl. Gebühr: Gebühr haengt vom Volumen ab -> zwei Iterationen genügen
+    let vol = amount;
+    for (let i = 0; i < 4; i++) vol = side === "buy" ? amount - feeFor(vol) : amount + feeFor(vol);
+    if (vol <= 0) return {error:"Betrag deckt nicht einmal die Gebühr."};
+    qty = vol / unitEur;
+  }
+  const gross = qty * unitEur;
+  const fee = feeFor(gross);
+  return {
+    date, price, fxRate, qty, gross, fee, unitEur,
+    total: side === "buy" ? gross + fee : gross - fee
+  };
+}
+
+function updatePreview() {
+  const box = $("#tPreview");
+  if (!sel) { box.innerHTML = ""; return; }
+  const o = currentOrder();
+  if (!o || o.error) { box.innerHTML = '<span class="muted">' + esc((o && o.error) || "") + "</span>"; return; }
+
+  const s = replay(o.date);
+  const held = (s.positions[sel.symbol] || {}).qty || 0;
+  const line = (a, b, c) => '<div style="display:flex;justify-content:space-between;gap:12px">' +
+    "<span>" + a + '</span><span class="mono ' + (c || "") + '">' + b + "</span></div>";
+
+  let warn = "";
+  if (side === "buy" && o.total > s.cash + 1e-6)
+    warn = '<div class="down" style="margin-top:7px">Barmittel am ' + deDate(o.date) + " reichen nicht: verfügbar " +
+           eur(s.cash) + ".</div>";
+  if (side === "sell" && o.qty > held + 1e-9)
+    warn = '<div class="down" style="margin-top:7px">Am ' + deDate(o.date) + " hältst du nur " +
+           num(held, 6) + " Stück.</div>";
+
+  box.innerHTML =
+    line("Stückzahl", num(o.qty, 6)) +
+    line("Kurswert", eur(o.gross)) +
+    line("Ordergebühr", eur(o.fee)) +
+    line(side === "buy" ? "<b>Belastung</b>" : "<b>Gutschrift</b>", "<b>" + eur(o.total) + "</b>",
+         side === "buy" ? "down" : "up") +
+    line("Barmittel danach", eur(side === "buy" ? s.cash - o.total : s.cash + o.total), "muted") +
+    (sel.currency !== "EUR"
+      ? '<div class="tiny muted" style="margin-top:6px">Umrechnung mit EZB-Kurs vom ' + deDate(o.date) +
+        ": 1 " + esc(sel.currency) + " = " + num(o.fxRate, 4) + " EUR</div>" : "") +
+    warn;
+}
+
+function renderTradeKpis() {
+  const s = snapshot();
+  let extra = "";
+  if (sel) {
+    const p = s.rows.find(r => r.symbol === sel.symbol);
+    extra = kpiCard("Bestand " + sel.symbol, p ? num(p.qty, 4) : "0",
+      p ? eur(p.value) + " · " + pct(p.pnlPct) : "keine Position", p ? cls(p.pnl) : "");
+  }
+  $("#tradeKpis").innerHTML = kpiCard("Barmittel", eur(s.cash), "für Käufe verfügbar") + extra;
+}
+
+/* -------------------------------------------------------- Buchen ---- */
+function addTx(tx) {
+  tx.id = uid();
+  tx.seq = state.transactions.length;
+  const test = state.transactions.concat([tx]);
+  const err = validate(test);
+  if (err) { toast(err, "err"); return false; }
+  state.transactions = test;
+  saveState();
+  return true;
+}
+
+/** Journal darf zu keinem Zeitpunkt negative Barmittel oder Bestände ergeben. */
+function validate(txns) {
+  const backup = state.transactions;
+  state.transactions = txns;
+  let msg = null;
+  try {
+    const list = sortedTx();
+    const hold = {};
+    let cash = 0;
+    for (const t of list) {
+      if (t.type === "deposit") cash += t.amount;
+      else if (t.type === "withdraw") {
+        cash -= t.amount;
+        if (cash < -1e-6) { msg = "Auszahlung am " + deDate(t.date) + " übersteigt die Barmittel."; break; }
+      } else if (t.type === "buy") {
+        cash -= (t.qty * t.price * (t.fx || 1) + (t.fee || 0));
+        hold[t.symbol] = (hold[t.symbol] || 0) + t.qty;
+        if (cash < -1e-6) { msg = "Kauf am " + deDate(t.date) + " übersteigt die Barmittel."; break; }
+      } else if (t.type === "sell") {
+        hold[t.symbol] = (hold[t.symbol] || 0) - t.qty;
+        if (hold[t.symbol] < -1e-9) { msg = "Verkauf am " + deDate(t.date) + " übersteigt den Bestand."; break; }
+        cash += (t.qty * t.price * (t.fx || 1) - (t.fee || 0));
+      }
+    }
+  } finally { state.transactions = backup; }
+  return msg;
+}
+
+function deleteTx(id) {
+  const tx = state.transactions.find(t => t.id === id);
+  if (!tx) return;
+  const rest = state.transactions.filter(t => t.id !== id);
+  const err = validate(rest);
+  if (err) { toast("Löschen nicht möglich – " + err, "err"); return; }
+  modal("<h3>Buchung löschen?</h3><div class='sub'>" + deDate(tx.date) + " · " +
+    ({deposit:"Einzahlung", withdraw:"Auszahlung", buy:"Kauf", sell:"Verkauf"}[tx.type]) +
+    (tx.symbol ? " " + esc(tx.symbol) : "") + "</div>" +
+    "<div class='btn-row'><button class='btn danger' id='mYes'>Ja, löschen</button>" +
+    "<button class='btn ghost' id='mNo'>Abbrechen</button></div>");
+  $("#mYes").onclick = () => {
+    state.transactions = rest; saveState(); closeModal();
+    toast("Buchung gelöscht", "ok"); refreshAll();
+  };
+  $("#mNo").onclick = closeModal;
+}
+
+/* ==================================================================
+   Ereignisse
+   ================================================================== */
+function switchView(name) {
+  $$("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.view === name));
+  $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
+  if (name === "overview") renderOverview();
+  if (name === "depot") renderDepot();
+  if (name === "cash") renderCash();
+  if (name === "ledger") renderLedger();
+  if (name === "markets") renderMarkets();
+  if (name === "trade") { renderTradeKpis(); renderAssetChart(); }
+}
+$("#tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-view]");
+  if (b) switchView(b.dataset.view);
+});
+
+// Segment-Umschalter allgemein
+function segment(sel2, attr, cb) {
+  $(sel2).addEventListener("click", e => {
+    const b = e.target.closest("button[data-" + attr + "]");
+    if (!b) return;
+    $$("button", $(sel2)).forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    cb(b.dataset[attr]);
+  });
+}
+segment("#rangeSeg", "range", r => { currentRange = r; renderOverview(); });
+segment("#assetRangeSeg", "range", r => { assetRange = r; renderAssetChart(); });
+segment("#sideSeg", "side", s => {
+  side = s;
+  $("#tSubmit").textContent = s === "buy" ? "Kauf ausführen" : "Verkauf ausführen";
+  $("#tSubmit").className = "btn " + (s === "buy" ? "buy" : "sell");
+  $("#fAmount label").textContent = s === "buy" ? "Anlagebetrag (€)" : "Verkaufserlös (€)";
+  updatePreview();
+});
+segment("#modeSeg", "mode", m => {
+  inputMode = m;
+  $("#fAmount").style.display = m === "amount" ? "" : "none";
+  $("#fQty").style.display = m === "qty" ? "" : "none";
+  updatePreview();
+});
+segment("#cashSeg", "kind", k => {
+  $("#cSubmit").textContent = "Buchen";
+  $("#cSubmit").dataset.kind = k;
+});
+
+// Wertpapiersuche
+let searchTimer = null;
+$("#symSearch").addEventListener("input", e => {
+  const q = e.target.value.trim();
+  clearTimeout(searchTimer);
+  if (q.length < 2) { $("#symResults").classList.remove("open"); return; }
+  searchTimer = setTimeout(async () => {
+    const res = await Prices.search(q);
+    const box = $("#symResults");
+    if (!res.length) {
+      box.innerHTML = '<div style="padding:12px" class="hint">Nichts gefunden. Ticker direkt eingeben, ' +
+        'z. B. <code>AAPL</code>, <code>SAP.DE</code>, <code>GC=F</code>.</div>';
+    } else {
+      box.innerHTML = res.map(r =>
+        '<button data-pick="' + esc(r.symbol) + '"><span class="s">' + esc(r.symbol) + "</span>" +
+        '<span class="n">' + esc(r.name) + "</span>" +
+        '<span class="pill"><span class="swatch" style="background:' + classOf(r.cls).color + '"></span>' +
+        classOf(r.cls).label + "</span></button>").join("");
+    }
+    box.classList.add("open");
+  }, 260);
+});
+$("#symSearch").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    const first = $("#symResults button[data-pick]");
+    const raw = e.target.value.trim();
+    if (first) selectAsset(first.dataset.pick);
+    else if (raw) selectAsset(raw.toUpperCase());
+  }
+});
+$("#symResults").addEventListener("click", e => {
+  const b = e.target.closest("button[data-pick]");
+  if (b) selectAsset(b.dataset.pick);
+});
+document.addEventListener("click", e => {
+  if (!e.target.closest(".search-box")) $("#symResults").classList.remove("open");
+});
+
+["#tDate"].forEach(id => $(id).addEventListener("change", syncPriceForDate));
+["#tPrice", "#tAmount", "#tQty"].forEach(id => $(id).addEventListener("input", updatePreview));
+
+$("#tReset").addEventListener("click", () => {
+  sel = null;
+  $("#selBox").style.display = "none";
+  $("#tEmptyHint").style.display = "";
+  $("#assetChart").innerHTML = '<div class="empty">Kein Wertpapier ausgewählt</div>';
+  ["#tAmount", "#tQty", "#tNote", "#tPrice"].forEach(i => $(i).value = "");
+});
+
+$("#tSubmit").addEventListener("click", () => {
+  if (!sel) return;
+  const o = currentOrder();
+  if (!o || o.error) { toast(o ? o.error : "Bitte Wertpapier wählen", "err"); return; }
+  const ok = addTx({
+    type: side, date: o.date, symbol: sel.symbol, name: sel.name,
+    cls: sel.cls, currency: sel.currency,
+    qty: o.qty, price: o.price, fx: o.fxRate, fee: o.fee,
+    note: $("#tNote").value.trim()
+  });
+  if (!ok) return;
+  toast((side === "buy" ? "Kauf" : "Verkauf") + " gebucht: " + num(o.qty, 4) + " × " + sel.symbol, "ok");
+  ["#tAmount", "#tQty", "#tNote"].forEach(i => $(i).value = "");
+  updatePreview(); renderTradeKpis(); refreshAll();
+});
+
+// Kasse
+$("#cSubmit").addEventListener("click", () => {
+  const kind = $("#cSubmit").dataset.kind || "deposit";
+  const amount = parseFloat($("#cAmount").value);
+  if (!(amount > 0)) { toast("Bitte einen Betrag eingeben.", "err"); return; }
+  const ok = addTx({type: kind, date: $("#cDate").value || today(), amount: amount,
+                    note: $("#cNote").value.trim()});
+  if (!ok) return;
+  toast((kind === "deposit" ? "Einzahlung" : "Auszahlung") + " über " + eur(amount) + " gebucht", "ok");
+  $("#cAmount").value = ""; $("#cNote").value = "";
+  refreshAll();
+});
+$$("[data-quick]").forEach(b => b.addEventListener("click", () => {
+  $("#cAmount").value = b.dataset.quick;
+  $$("#cashSeg button").forEach(x => x.classList.toggle("active", x.dataset.kind === "deposit"));
+  $("#cSubmit").dataset.kind = "deposit";
+  $("#cSubmit").click();
+}));
+
+// Zeilenaktionen (Depot, Märkte, Kasse, Verlauf)
+document.addEventListener("click", e => {
+  const buy = e.target.closest("[data-buy]");
+  const sellB = e.target.closest("[data-sell]");
+  const del = e.target.closest("[data-del]");
+  const grp = e.target.closest("[data-group]");
+  if (buy || sellB) {
+    const s = (buy || sellB).dataset.buy || sellB.dataset.sell;
+    switchView("trade");
+    side = buy ? "buy" : "sell";
+    $$("#sideSeg button").forEach(x => x.classList.toggle("active", x.dataset.side === side));
+    $("#tSubmit").textContent = side === "buy" ? "Kauf ausführen" : "Verkauf ausführen";
+    $("#tSubmit").className = "btn " + (side === "buy" ? "buy" : "sell");
+    selectAsset(s);
+  }
+  if (del) deleteTx(del.dataset.del);
+  if (grp) { marketGroup = grp.dataset.group; renderMarkets(); }
+});
+$("#ledgerFilter").addEventListener("change", renderLedger);
+$("#refreshBtn").addEventListener("click", async () => {
+  Prices.clearCache();
+  toast("Lade aktuelle Kurse …");
+  location.reload();
+});
+
+/* ------------------------------------------------------ Einstellungen */
+function loadSettingsForm() {
+  $("#sFeeMode").value = state.settings.feeMode;
+  $("#sFeeValue").value = state.settings.feeValue;
+  $("#sFeeMin").value = state.settings.feeMin;
+}
+$("#sSave").addEventListener("click", () => {
+  state.settings.feeMode = $("#sFeeMode").value;
+  state.settings.feeValue = Math.max(0, parseFloat($("#sFeeValue").value) || 0);
+  state.settings.feeMin = Math.max(0, parseFloat($("#sFeeMin").value) || 0);
+  saveState(); updatePreview();
+  toast("Gebühren gespeichert", "ok");
+});
+
+$("#exportBtn").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "finanzdashboard-" + today() + ".json";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+$("#importBtn").addEventListener("click", () => $("#importFile").click());
+$("#importFile").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const s = JSON.parse(r.result);
+      if (!s || !Array.isArray(s.transactions)) throw new Error("Kein gültiges Depot");
+      state = Object.assign(defaultState(), s);
+      state.settings = Object.assign(defaultState().settings, s.settings || {});
+      saveState(); loadSettingsForm();
+      toast("Depot eingespielt: " + state.transactions.length + " Buchungen", "ok");
+      boot(true);
+    } catch (err) { toast("Import fehlgeschlagen: " + err.message, "err"); }
+  };
+  r.readAsText(f);
+  e.target.value = "";
+});
+
+$("#csvBtn").addEventListener("click", () => {
+  const head = ["Datum", "Art", "Symbol", "Name", "Anzahl", "Kurs", "Waehrung", "FX", "Gebuehr_EUR", "Betrag_EUR", "Notiz"];
+  const rows = sortedTx().map(t => {
+    const isTrade = t.type === "buy" || t.type === "sell";
+    const gross = isTrade ? t.qty * t.price * (t.fx || 1) : t.amount;
+    const total = isTrade ? (t.type === "buy" ? gross + (t.fee || 0) : gross - (t.fee || 0)) : t.amount;
+    return [t.date, t.type, t.symbol || "", t.name || "", isTrade ? t.qty : "",
+            isTrade ? t.price : "", t.currency || "EUR", t.fx || 1, t.fee || 0,
+            total.toFixed(2), t.note || ""];
+  });
+  const csv = [head].concat(rows)
+    .map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(";")).join("\r\n");
+  const blob = new Blob(["﻿" + csv], {type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "buchungen-" + today() + ".csv";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+$("#resetBtn").addEventListener("click", () => {
+  modal("<h3>Alles zurücksetzen?</h3><div class='sub'>Sämtliche Buchungen werden gelöscht. " +
+    "Das lässt sich nicht rückgängig machen – vorher gegebenenfalls sichern.</div>" +
+    "<div class='btn-row'><button class='btn danger' id='mYes'>Ja, zurücksetzen</button>" +
+    "<button class='btn ghost' id='mNo'>Abbrechen</button></div>");
+  $("#mYes").onclick = () => {
+    const theme = state.settings.theme;
+    state = defaultState(); state.settings.theme = theme;
+    saveState(); closeModal(); toast("Depot zurückgesetzt", "ok"); boot(true);
+  };
+  $("#mNo").onclick = closeModal;
+});
+
+$("#seedBtn").addEventListener("click", async () => {
+  if (state.transactions.length) {
+    modal("<h3>Beispiel-Depot laden?</h3><div class='sub'>Die vorhandenen " + state.transactions.length +
+      " Buchungen werden dabei ersetzt.</div><div class='btn-row'>" +
+      "<button class='btn primary' id='mYes'>Ersetzen</button>" +
+      "<button class='btn ghost' id='mNo'>Abbrechen</button></div>");
+    $("#mNo").onclick = closeModal;
+    $("#mYes").onclick = () => { closeModal(); seedDemo(); };
+  } else seedDemo();
+});
+
+async function seedDemo() {
+  const start = addDays(today(), -1095);          // vor drei Jahren
+  const plan = [
+    {s:"EUNL.DE", eur: 4000},
+    {s:"4GLD.DE", eur: 2000},
+    {s:"SXR8.DE", eur: 2000},
+    {s:"AAPL",    eur: 1200},
+    {s:"SAP.DE",  eur: 800}
+  ];
+  toast("Lade Kursdaten für das Beispiel-Depot …");
+  state.transactions = [];
+  state.transactions.push({id:uid(), seq:0, type:"deposit", date:start, amount:10000,
+                           note:"Startkapital Beispiel-Depot"});
+  let seq = 1;
+  for (const p of plan) {
+    let h;
+    try { h = await Prices.history(p.s); } catch (e) { continue; }
+    await Prices.fxSeries(h.currency, start);
+    const price = Prices.priceAt(p.s, start);
+    if (!price) continue;
+    const fxr = Prices.fxAt(h.currency, start);
+    const unit = price * fxr;
+    let vol = p.eur;
+    for (let i = 0; i < 4; i++) vol = p.eur - feeFor(vol);
+    const qty = vol / unit;
+    state.transactions.push({
+      id:uid(), seq:seq++, type:"buy", date:start, symbol:p.s, name:h.name, cls:h.cls,
+      currency:h.currency, qty:qty, price:price, fx:fxr, fee:feeFor(vol),
+      note:"Beispiel-Depot"
+    });
+  }
+  saveState();
+  toast("Beispiel-Depot geladen", "ok");
+  await boot(true);
+  switchView("overview");
+}
+
+// Theme
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  state.settings.theme = t;
+  clearPalette();
+}
+$("#themeBtn").addEventListener("click", () => {
+  applyTheme(state.settings.theme === "dark" ? "light" : "dark");
+  saveState();
+  const active = $("#tabs button.active");
+  switchView(active ? active.dataset.view : "overview");
+});
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const active = $("#tabs button.active");
+    const v = active ? active.dataset.view : "overview";
+    if (v === "overview") renderOverview();
+    if (v === "trade") renderAssetChart();
+  }, 180);
+});
+
+function refreshAll() {
+  const active = $("#tabs button.active");
+  switchView(active ? active.dataset.view : "overview");
+}
+
+/* ==================================================================
+   Start
+   ================================================================== */
+function setStatus(kind, text) {
+  $("#statusPill").innerHTML = '<span class="dot ' + kind + '"></span><span>' + esc(text) + "</span>";
+}
+
+/* Wenn das Depot nur im Browser liegt, muss das oben stehen und nicht in
+   den Einstellungen versteckt sein – sonst geht es beim Leeren des
+   Browser-Speichers verloren, ohne dass jemand gewarnt war. */
+function updateBanner() {
+  const el = $("#banner");
+  if (!el) return;
+  if (FileStore.available) { el.className = ""; el.innerHTML = ""; return; }
+
+  // Nur wenn /api/status antwortet, laeuft unser Server ueberhaupt
+  const alterServer = Prices.live;
+  el.innerHTML = alterServer
+    ? '<div class="warnbar"><span class="ic">⚠️</span><div class="tx">' +
+      "<b>Der laufende Server kennt die Depotspeicherung noch nicht.</b> Er wurde vor der " +
+      "Aktualisierung gestartet. Beende ihn im Terminal mit <code>Strg+C</code> und starte ihn neu " +
+      "— bis dahin liegt dein Depot <b>nur in diesem Browser</b>." +
+      "</div></div>"
+    : '<div class="warnbar"><span class="ic">⚠️</span><div class="tx">' +
+      "<b>Dein Depot liegt nur in diesem Browser.</b> Die Seite wurde direkt geöffnet, ohne den " +
+      "lokalen Server — deshalb sind die Kurse simuliert und es wird <b>keine</b> " +
+      "<code>depot.json</code> geschrieben. Wird der Browser-Speicher geleert, ist das Depot weg." +
+      "<br>Für echte Kurse und automatische Speicherung im Projektordner im Terminal starten:<br>" +
+      "<code>python3 server.py</code> und dann <code>http://localhost:8777</code> öffnen — " +
+      "nicht die Datei doppelklicken." +
+      "</div></div>";
+  el.className = "show";
+}
+
+function updateSaveHint() {
+  const el = $("#saveHint");
+  if (!el) return;
+  const uhr = FileStore.lastSaved
+    ? new Date(FileStore.lastSaved).toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit", second:"2-digit"})
+    : null;
+  el.innerHTML = FileStore.available
+    ? "Jede Buchung wird <b>automatisch doppelt gespeichert</b>: im Browser (localStorage) und als " +
+      "Datei im Projektordner.<br><code>" + esc(FileStore.path || "depot.json") + "</code><br>" +
+      (uhr ? "Zuletzt geschrieben um " + uhr + ". " : "") +
+      "Der vorherige Stand bleibt als <code>depot.backup.json</code> daneben liegen. Beim Start " +
+      "gewinnt der jüngere der beiden Stände — ein geleerter Browser-Cache kostet dich also nichts. " +
+      "Nichts wird hochgeladen." +
+      (FileStore.lastError ? '<br><span class="down">Letzter Schreibversuch scheiterte: ' +
+        esc(FileStore.lastError) + "</span>" : "")
+    : Prices.live
+    ? "Die Buchungen liegen <b>nur im Browser</b> (localStorage): der laufende Server kennt den " +
+      "Endpunkt <code>/api/state</code> noch nicht, er wurde vor der Aktualisierung gestartet. " +
+      "Beende ihn mit <code>Strg+C</code> und starte <code>python3 server.py</code> neu — danach " +
+      "wird jede Buchung zusätzlich als <code>depot.json</code> im Projektordner abgelegt."
+    : "Die Buchungen liegen <b>nur im Browser</b> (localStorage), weil die Seite ohne den lokalen " +
+      "Server geöffnet wurde — per Doppelklick auf <code>web_app.html</code> läuft die App unter " +
+      "<code>file://</code> und kann keine Datei schreiben. Ein geleerter Browser-Speicher bedeutet " +
+      "dann ein leeres Depot. Starte <code>python3 server.py</code> und öffne " +
+      "<code>http://localhost:8777</code>, dann wird jede Buchung automatisch als " +
+      "<code>depot.json</code> im Projektordner gespeichert.";
+}
+
+/* Browser- und Dateistand abgleichen: der jüngere gewinnt, der andere
+   wird nachgezogen. Deckt geleerten Cache, Browserwechsel und einen
+   erst später gestarteten Server ab. */
+async function syncStores() {
+  const fileState = await FileStore.load();
+  if (!FileStore.available) return;
+
+  const localAt = state.updatedAt || 0;
+  const fileAt = (fileState && fileState.updatedAt) || 0;
+
+  if (fileState && fileAt > localAt) {
+    // Ersetzt der Dateistand vorhandene Buchungen, muss das sichtbar sein
+    const ersetzt = state.transactions.length;
+    state = Object.assign(defaultState(), fileState);
+    state.settings = Object.assign(defaultState().settings, fileState.settings || {});
+    state.meta = fileState.meta || {};
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+    if (ersetzt) {
+      toast("Neuerer Stand aus depot.json übernommen: " + state.transactions.length +
+            " statt " + ersetzt + " Buchungen im Browser", "ok");
+    }
+  } else if (state.transactions.length || localAt > fileAt) {
+    await FileStore.flush();          // Datei fehlt oder ist älter
+  }
+}
+
+async function boot(skipDetect) {
+  if (!skipDetect) {
+    setStatus("busy", "verbinde …");
+    await Prices.detect();
+    await syncStores();
+  }
+  applyTheme(state.settings.theme || "dark");
+  loadSettingsForm();
+  $("#tDate").value = today();
+  $("#cDate").value = today();
+  $("#cSubmit").dataset.kind = $("#cSubmit").dataset.kind || "deposit";
+
+  setStatus(Prices.live ? "live" : "demo",
+    Prices.live ? "Live-Kurse (Yahoo Finance)" : "Demo-Modus – simulierte Kurse");
+
+  $("#sourceInfo").innerHTML = Prices.live
+    ? "<b>Live-Modus aktiv.</b> Aktive Quellen: " + esc(Prices.sourceInfo) + ".<br><br>" +
+      "Abgefragt wird der Reihe nach: <b>Yahoo Finance</b> (ohne Schlüssel, breiteste Abdeckung — " +
+      "Tagesschlusskurse, um Ausschüttungen bereinigt), dann <b>Twelve Data</b>" +
+      (Prices.hasTwelveData ? "" : " (nicht eingerichtet)") +
+      ", dann <b>CoinGecko</b> für Krypto. Fällt eine Quelle aus, springt die nächste ein; " +
+      "notfalls liefert der Servercache ältere Kurse statt gar keiner." +
+      (Prices.hasTwelveData ? "" :
+        "<br><br><b>Zweite Quelle einrichten (empfohlen):</b> Yahoo drosselt bei vielen Abfragen " +
+        "zeitweise die ganze IP. Ein kostenloser Schlüssel bei <code>twelvedata.com</code> " +
+        "(800 Abrufe/Tag) schafft Reserve. Dann im Projektordner eine <code>config.json</code> anlegen:<br>" +
+        "<code>{ \"twelvedata_key\": \"DEIN_SCHLUESSEL\" }</code><br>" +
+        "und den Server neu starten.")
+    : "<b>Demo-Modus.</b> Die Seite wurde ohne den lokalen Server geöffnet, deshalb sind keine echten Kurse " +
+      "abrufbar (Yahoo Finance erlaubt keine direkten Browser-Zugriffe). Die gezeigten Kurse sind simuliert, " +
+      "aber reproduzierbar. Für echte Marktdaten im Projektordner starten:<br>" +
+      "<code>python3 server.py</code> &nbsp;→&nbsp; <code>http://localhost:8777</code>";
+
+  updateBanner();
+  updateSaveHint();
+
+  // Kursdaten aller gehaltenen Positionen laden, damit Bewertung und Verlauf stimmen
+  const syms = {};
+  state.transactions.forEach(t => { if (t.symbol) syms[t.symbol] = 1; });
+  const list = Object.keys(syms);
+  let failed = [];
+  if (list.length) {
+    setStatus("busy", "lade Kurse (" + list.length + ") …");
+    const first = sortedTx()[0];
+    for (const s of list) {
+      try {
+        const h = await Prices.history(s);
+        await Prices.fxSeries(h.currency, (first && first.date) || "2015-01-01");
+      } catch (e) { failed.push(s); console.warn("Kursdaten fehlen für", s, e.message); }
+    }
+  }
+
+  if (failed.length && failed.length === list.length) {
+    setStatus("demo", "Kursquelle nicht erreichbar");
+    toast("Keine Kurse abrufbar – Positionen stehen zum Einstandswert. Mehr unter „Einstellungen“.", "err");
+    $("#sourceInfo").insertAdjacentHTML("afterbegin",
+      '<div class="note" style="margin-bottom:12px;border-left-color:var(--down)">' +
+      "<b>Gerade kommen keine Kurse durch.</b> Häufigster Grund: Yahoo drosselt nach vielen Abfragen " +
+      "die ganze IP-Adresse — das löst sich nach einigen Minuten bis Stunden von selbst, ein Neuladen " +
+      "hilft dann. Wer nicht warten will, richtet wie unten beschrieben Twelve Data als zweite Quelle " +
+      "ein. Dein Depot ist davon nicht betroffen: alle Buchungen bleiben erhalten, die Positionen " +
+      "werden solange zum Einstandswert ausgewiesen.</div>");
+  } else if (failed.length) {
+    setStatus(Prices.live ? "live" : "demo", failed.length + " Kurs(e) fehlen");
+    toast("Keine Kurse für: " + failed.join(", "), "err");
+  } else {
+    setStatus(Prices.live ? "live" : "demo",
+      Prices.live ? "Live-Kurse (Yahoo Finance)" : "Demo-Modus – simulierte Kurse");
+  }
+
+  refreshAll();
+}
+
+loadState();
+applyTheme(state.settings.theme || "dark");
+boot();
+</script>
+</body>
+</html>
